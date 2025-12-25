@@ -1,0 +1,13 @@
+{
+    "LogLevel": "info",
+    "LogMode": "console",
+    "LogFilePath": "./acp.log",
+    "CopyModel": "RWCombined",
+    "CopyEngine": "AIO",
+    "CopyOptions": {
+        "QueueDepth": 16,
+        "IOSize": 1048576,
+        "Batch": 8,
+        "IOReapWait": 1
+    }
+}

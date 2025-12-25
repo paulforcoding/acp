@@ -1,0 +1,4 @@
+
+规则：
+1. 使用info log level记录性能之事
+2. 使用debug log level记录程序是否运行正常之事

@@ -1,0 +1,11 @@
+
+This GDB supports auto-downloading debuginfo from the following URLs:
+  <https://debuginfod.fedoraproject.org/>
+Enable debuginfod for this session? (y or [n]) [answered N; input not from terminal]
+Debuginfod has been disabled.
+To make this setting permanent, add 'set debuginfod enabled off' to .gdbinit.
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/lib64/libthread_db.so.1".
+Destination path does not exist: /tmp/file1_copy.bin
+[Inferior 1 (process 8905) exited with code 01]
+No stack.
