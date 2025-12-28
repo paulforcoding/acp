@@ -36,6 +36,12 @@
 *.exe
 *.out
 *.app
+acp
 
 # debug information files
 *.dwo
+
+# IDE files
+.idea/
+.vscode/
+

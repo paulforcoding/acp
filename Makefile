@@ -1,18 +1,35 @@
 # Makefile for AIO File Copy Tool
-CXX = g++
-CXXFLAGS = -g -std=c++20 -Wall -Wextra -I. -O2
-LDFLAGS = -laio -luring
+# Auto-generated configuration is included below
+-include config.mk
+
+# If config.mk doesn't exist, provide defaults
+CXX ?= g++
+CXXFLAGS ?= -g -std=c++20 -Wall -Wextra -I. -O2
+LDFLAGS ?= -laio
+
 SOURCES = main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp 
 OBJECTS = $(SOURCES:.cpp=.o)
 TARGET = acp
 
-all: $(TARGET)
-$(TARGET): $(OBJECTS)
-	$(CXX) $(LDFLAGS) -o $@ $^
+all: check-config $(TARGET)
 
-%.o: %.cpp
+check-config:
+	@if [ ! -f config.h ] || [ ! -f config.mk ]; then \
+		echo "Error: Configuration files not found!"; \
+		echo "Please run: ./configure"; \
+		exit 1; \
+	fi
+
+$(TARGET): $(OBJECTS)
+	$(CXX) -o $@ $^ $(LDFLAGS)
+
+%.o: %.cpp config.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJECTS) $(TARGET)
-.PHONY: all clean
+
+distclean: clean
+	rm -f config.h config.mk
+
+.PHONY: all clean distclean check-config

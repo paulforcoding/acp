@@ -1,0 +1,235 @@
+#!/bin/bash
+
+# Configure script for ACP (AIO File Copy Tool)
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+# Default values
+ENABLE_URING=0
+CXX=${CXX:-g++}
+CXXFLAGS=${CXXFLAGS:--g -std=c++20 -Wall -Wextra -O2}
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --enable-uring)
+            ENABLE_URING=1
+            shift
+            ;;
+        --disable-uring)
+            ENABLE_URING=0
+            shift
+            ;;
+        --help)
+            cat << EOF
+Usage: ./configure [OPTION]...
+
+Optional Features:
+  --enable-uring         Enable liburing support (default: disabled)
+  --disable-uring        Disable liburing support (default)
+
+Optional Packages:
+  CXX=COMPILER          Set C++ compiler (default: g++)
+  CXXFLAGS=FLAGS        Set C++ compiler flags
+
+Examples:
+  ./configure --enable-uring
+  CXX=clang++ ./configure
+  CXX=clang++ CXXFLAGS="-O3" ./configure
+
+EOF
+            exit 0
+            ;;
+        *)
+            echo -e "${YELLOW}Unknown option: $1${NC}"
+            exit 1
+            ;;
+    esac
+done
+
+# Function to check if a header file exists in standard include paths
+check_header() {
+    local header=$1
+    
+    # Try to find header in common include paths
+    for path in /usr/include /usr/local/include /opt/local/include; do
+        if [ -f "$path/$header" ]; then
+            return 0
+        fi
+    done
+    
+    # Try pkg-config first
+    if command -v pkg-config &> /dev/null; then
+        pkg-config --cflags "${header%/*}" &> /dev/null && return 0
+    fi
+    
+    return 1
+}
+
+# Function to check if a library can be linked
+check_lib_link() {
+    local lib=$1
+    local flag=$2
+    
+    echo -n "Checking if $lib is linkable... "
+    
+    cat > /tmp/test_link.cpp << 'EOF'
+int main() { return 0; }
+EOF
+    
+    if $CXX $CXXFLAGS -c /tmp/test_link.cpp -o /tmp/test_link.o 2>/dev/null && \
+       timeout 5 $CXX $CXXFLAGS -o /tmp/test_link /tmp/test_link.o $flag 2>/dev/null; then
+        rm -f /tmp/test_link.cpp /tmp/test_link.o /tmp/test_link
+        echo -e "${GREEN}yes${NC}"
+        return 0
+    else
+        rm -f /tmp/test_link.cpp /tmp/test_link.o /tmp/test_link
+        echo -e "${RED}no${NC}"
+        return 1
+    fi
+}
+
+echo "Configuring ACP (AIO File Copy Tool)..."
+echo ""
+
+# Check for required dependencies
+echo "Checking for required dependencies..."
+
+# Check libaio
+echo -n "Checking for libaio... "
+if check_header "libaio.h"; then
+    echo -e "${GREEN}found${NC}"
+else
+    echo -e "${RED}not found${NC}"
+    echo -e "${RED}ERROR: libaio is required but not found${NC}"
+    echo "Please install libaio development files:"
+    echo "  Ubuntu/Debian: sudo apt-get install libaio-dev"
+    echo "  CentOS/RHEL:   sudo yum install libaio-devel"
+    exit 1
+fi
+
+if ! check_lib_link "libaio" "-laio"; then
+    echo -e "${RED}ERROR: Cannot link against libaio${NC}"
+    exit 1
+fi
+
+# Check spdlog
+echo -n "Checking for spdlog... "
+if check_header "spdlog/spdlog.h"; then
+    echo -e "${GREEN}found${NC}"
+else
+    echo -e "${RED}not found${NC}"
+    echo -e "${RED}ERROR: spdlog is required but not found${NC}"
+    echo "Please install spdlog development files:"
+    echo "  Ubuntu/Debian: sudo apt-get install libspdlog-dev"
+    echo "  CentOS/RHEL:   sudo yum install spdlog-devel"
+    echo "  macOS: brew install spdlog"
+    exit 1
+fi
+
+echo ""
+echo "Checking for optional dependencies..."
+
+# Check for liburing (optional)
+LIBURING_AVAILABLE=0
+echo -n "Checking for liburing... "
+if check_header "liburing.h"; then
+    echo -e "${GREEN}found${NC}"
+    if check_lib_link "liburing" "-luring"; then
+        LIBURING_AVAILABLE=1
+        echo -e "${GREEN}liburing is available${NC}"
+    else
+        echo -e "${YELLOW}liburing header found but not linkable${NC}"
+    fi
+else
+    echo -e "${YELLOW}not found (this is optional)${NC}"
+fi
+
+echo ""
+
+# Validate configuration
+if [ $ENABLE_URING -eq 1 ] && [ $LIBURING_AVAILABLE -eq 0 ]; then
+    echo -e "${RED}ERROR: --enable-uring was specified but liburing is not available${NC}"
+    exit 1
+fi
+
+# Generate config.h
+echo "Generating config.h..."
+
+cat > config.h << EOF
+/*
+ * Auto-generated configuration header
+ * DO NOT EDIT MANUALLY - run configure script instead
+ */
+
+#pragma once
+
+/* libaio support (required) */
+#define HAVE_LIBAIO 1
+
+/* spdlog support (required) */
+#define HAVE_SPDLOG 1
+
+/* liburing support (optional) */
+EOF
+
+if [ $ENABLE_URING -eq 1 ]; then
+    echo "#define HAVE_LIBURING 1" >> config.h
+else
+    echo "#define HAVE_LIBURING 0" >> config.h
+fi
+
+cat >> config.h << EOF
+
+#endif
+EOF
+
+# Generate config.mk
+echo "Generating config.mk..."
+
+cat > config.mk << 'EOF'
+# Auto-generated configuration makefile
+# DO NOT EDIT MANUALLY - run configure script instead
+
+CXX ?= g++
+CXXFLAGS = -g -std=c++20 -Wall -Wextra -I. -O2
+LDFLAGS = -laio
+EOF
+
+if [ $ENABLE_URING -eq 1 ]; then
+    echo "LDFLAGS += -luring" >> config.mk
+fi
+
+cat >> config.mk << 'EOF'
+
+# Feature flags
+EOF
+
+if [ $ENABLE_URING -eq 1 ]; then
+    echo "CXXFLAGS += -DENABLE_LIBURING" >> config.mk
+fi
+
+# Display summary
+echo ""
+echo "=========================================="
+echo "Configuration Summary"
+echo "=========================================="
+echo "C++ Compiler:        $CXX"
+echo "C++ Flags:           $CXXFLAGS"
+echo "Required Libraries:  libaio, spdlog"
+echo "Optional Libraries:  liburing"
+echo "=========================================="
+echo ""
+echo -e "liburing support:    $([ $ENABLE_URING -eq 1 ] && echo -e "${GREEN}enabled${NC}" || echo -e "${YELLOW}disabled${NC}")"
+echo ""
+
+echo "Configuration complete!"
+echo ""
+echo "Next steps:"
+echo "  1. Run 'make' to build the project"
+echo "  2. Run 'make clean' to clean build artifacts"
+echo ""

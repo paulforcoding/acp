@@ -1,5 +1,5 @@
 #pragma once
-
+#define FMT_HEADER_ONLY
 #include <cstddef> // size_t
 #include <stdexcept>
 #include <list>
