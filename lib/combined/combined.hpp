@@ -82,6 +82,10 @@ struct RWCombinedCopyOptions
     std::string LogMode;
     std::string LogFilePath;
     std::string CopyEngine;
+    int CopyParallelism;
+    bool CopyDirMTime;
+    bool FullCopyBeforeInotify;
+    bool PreserveSparseFiles;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
     size_t QueueDepth = 8;
     int Batch = 4;

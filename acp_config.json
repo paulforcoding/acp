@@ -2,8 +2,11 @@
     "LogLevel": "info",
     "LogMode": "console",
     "LogFilePath": "./acp.log",
-    "CopyModel": "RWCombined",
     "CopyEngine": "AIO",
+    "CopyParallelism": 4,
+    "CopyDirMTime": false,
+    "FullCopyBeforeInotify": false,
+    "PreserveSparseFiles": true,
     "CopyOptions": {
         "QueueDepth": 16,
         "IOSize": 1048576,

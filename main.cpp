@@ -27,6 +27,11 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     options.LogLevel = data["LogLevel"];
     options.LogMode = data["LogMode"];
     options.LogFilePath = data["LogFilePath"];
+    options.CopyEngine = data["CopyEngine"];
+    options.CopyParallelism = data["CopyParallelism"];
+    options.CopyDirMTime = data["CopyDirMTime"];
+    options.FullCopyBeforeInotify = data["FullCopyBeforeInotify"];
+    options.PreserveSparseFiles = data["PreserveSparseFiles"];
 
     return options;
 }
