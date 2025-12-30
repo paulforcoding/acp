@@ -24,22 +24,22 @@ public:
             close(mFD);
         }
     };
-    tl::expected<void, zplib::StackError> Init()
+    tl::expected<void, StackError> Init()
     {
         if (mFD < 0)
         {
-            return tl::unexpected(zplib::StackError("inotify_init failed"));
+            return tl::unexpected(StackError("inotify_init failed"));
         }
         return AddWatch(mRootPath);
     }
-    tl::expected<void, zplib::StackError> AddWatch(const std::string &path)
+    tl::expected<void, StackError> AddWatch(const std::string &path)
     {
 
         // resursively add all directories under path
         int wd = inotify_add_watch(mFD, path.c_str(), mMask);
         if (wd < 0)
         {
-            throw zplib::StackError(fmt::format("inotify_add_watch failed for path {}", path));
+            throw StackError(fmt::format("inotify_add_watch failed for path {}", path));
         }
         // begin recursive add
         for (const auto &entry : fs::recursive_directory_iterator(path))
@@ -49,7 +49,7 @@ public:
                 int cwd = inotify_add_watch(mFD, entry.path().c_str(), mMask);
                 if (cwd < 0)
                 {
-                    throw zplib::StackError(
+                    throw StackError(
                         fmt::format("inotify_add_watch failed for path {}", entry.path().string()));
                 }
             }
@@ -57,14 +57,14 @@ public:
         return {};
     }
 
-    tl::expected<void, zplib::StackError> ReadEventToChannel(InotifyChannel &channel)
+    tl::expected<void, StackError> ReadEventToChannel(InotifyChannel &channel)
     {
         constexpr size_t EVENT_BUF_LEN = 1024 * (sizeof(struct inotify_event) + 16);
         char buffer[EVENT_BUF_LEN];
         ssize_t length = read(mFD, buffer, EVENT_BUF_LEN);
         if (length < 0)
         {
-            return tl::unexpected(zplib::StackError("inotify read failed"));
+            return tl::unexpected(StackError("inotify read failed"));
         }
         size_t i = 0;
         while (i < static_cast<size_t>(length))
@@ -100,5 +100,5 @@ private:
     int mFD = -1;
     std::string mRootPath;
     int mMask = IN_CLOSE_WRITE | IN_CREATE;
-    std::shared_ptr<spdlog::logger> m_logger = zplib::GetGlobalLogger();
+    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
 };

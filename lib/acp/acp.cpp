@@ -4,14 +4,14 @@
 // #include <linux/aio_abi.h> // don't include this, it may cause conflict with libaio
 #include <linux/fs.h> // RWF_NOWAIT
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::Init()
+tl::expected<void, StackError> AIOSlotMgr::Init()
 {
 
     io_context_t ctx = 0;
     int ret = io_setup(static_cast<unsigned>(m_slots.size()), &ctx);
     if (ret < 0)
     {
-        return tl::unexpected(zplib::StackError("io_setup() failed, errno: " + std::to_string(-ret)));
+        return tl::unexpected(StackError("io_setup() failed, errno: " + std::to_string(-ret)));
     }
     m_io_ctx = ctx;
 
@@ -34,7 +34,7 @@ void AIOSlotMgr::PrepareOneRead(AIOSlot *slot, off_t offset, std::shared_ptr<CPF
     currCPFPIt->UpdateReadBytes(io_size);
     return;
 }
-tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
+tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
 {
     // m_logger->debug("Submitting read IO for slot ID: {}", slot->GetID());
 
@@ -54,7 +54,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
     //     auto check_res = CheckOneCompleted(slot);
     //     if (!check_res)
     //     {
-    //         return tl::unexpected(zplib::StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
+    //         return tl::unexpected(StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
     //     }
 
     //     // 不能在这里直接 CheckOneCompleted，因为此时currCPFPIt还没有被加入到inflight列表中
@@ -77,10 +77,10 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
         {
             m_logger->warn("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
             // PrtSlots();
-            return tl::unexpected(zplib::StackError("EAGAIN"));
+            return tl::unexpected(StackError("EAGAIN"));
         }
 
-        return tl::unexpected(zplib::StackError(
+        return tl::unexpected(StackError(
             fmt::format("io_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }
     else
@@ -90,7 +90,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
     return {};
 }
 
-tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitReads()
+tl::expected<int, StackError> AIOSlotMgr::SubmitReads()
 {
     // TODO: change to batch submit later
     int submitted = 0;
@@ -101,7 +101,7 @@ tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitReads()
 
         if (!next_res)
         {
-            return tl::unexpected(zplib::StackError("mCPFPMgr->GetNextReadIO(), err: ", next_res.error()));
+            return tl::unexpected(StackError("mCPFPMgr->GetNextReadIO(), err: ", next_res.error()));
         }
 
         auto nextIO = next_res.value();
@@ -126,7 +126,7 @@ tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitReads()
             if (!res)
             {
                 // if EAGAIN, break and try again later
-                if (res.error() == zplib::StackError("EAGAIN"))
+                if (res.error() == StackError("EAGAIN"))
                 {
                     m_logger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
                     PrtSlots();
@@ -158,7 +158,7 @@ void AIOSlotMgr::PrepareOneWrite(AIOSlot *slot, off_t offset)
     return;
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
+tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
 {
     assert(slot->GetStatus() == IOSlot::Status::WritePrepared);
     auto iocb = slot->GetWriteIOCB();
@@ -186,10 +186,10 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
         if (ret == -EAGAIN)
         {
             m_logger->warn("io_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
-            return tl::unexpected(zplib::StackError("EAGAIN"));
+            return tl::unexpected(StackError("EAGAIN"));
         }
 
-        return tl::unexpected(zplib::StackError(
+        return tl::unexpected(StackError(
             fmt::format("io_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }
     else
@@ -202,7 +202,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
 }
 
 // 使用RWF_NOWAIT标志提交写请求会多此一个步骤
-tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitWrites()
+tl::expected<int, StackError> AIOSlotMgr::SubmitWrites()
 {
     // TODO: change to batch submit later
     int submitted = 0;
@@ -218,7 +218,7 @@ tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitWrites()
             if (!res)
             {
                 // if EAGAIN, break and try again later
-                if (res.error() == zplib::StackError("EAGAIN"))
+                if (res.error() == StackError("EAGAIN"))
                 {
                     m_logger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
                     PrtSlots();
@@ -236,7 +236,7 @@ tl::expected<int, zplib::StackError> AIOSlotMgr::SubmitWrites()
 }
 
 // reap read IO and submit write IO with current IOSlot's buffer
-tl::expected<void, zplib::StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
+tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
 {
 
     ssize_t io_ret = ev->res;
@@ -257,12 +257,12 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
             return {}; // let SubmitReads handle resubmission in next round
         }
 
-        return tl::unexpected(zplib::StackError("AIO read failed, errno: " + std::to_string(-io_ret)));
+        return tl::unexpected(StackError("AIO read failed, errno: " + std::to_string(-io_ret)));
     }
 
     if (io_ret == 0)
     {
-        return tl::unexpected(zplib::StackError("AIO read returned 0 bytes read, unexpected."));
+        return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
     }
 
     m_logger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
@@ -275,7 +275,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
     return {};
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
+tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
 {
 
     ssize_t io_ret = ev->res;
@@ -298,13 +298,13 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
             PrepareOneWrite(slot, cb->u.c.offset);
             return {}; // let SubmitWrites handle resubmission in next round, this will let read IO go first
         }
-        return tl::unexpected(zplib::StackError(
+        return tl::unexpected(StackError(
             fmt::format("AIO write failed, errno: {}, errstr: {}, offset: {}, io_size: {}",
                         io_ret, strerror(-io_ret), cb->u.c.offset, cb->u.c.nbytes)));
     }
     if (io_ret == 0)
     {
-        return tl::unexpected(zplib::StackError("AIO write returned 0 bytes written, unexpected."));
+        return tl::unexpected(StackError("AIO write returned 0 bytes written, unexpected."));
     }
 
     m_logger->debug("AIO write completed for slot ID: {}, offset: {}, bytes written: {}, src: {}, dst: {}",
@@ -316,13 +316,13 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
     auto check_res = CheckOneCompleted(slot);
     if (!check_res)
     {
-        return tl::unexpected(zplib::StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
+        return tl::unexpected(StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
     }
 
     return {};
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::IOReap()
+tl::expected<void, StackError> AIOSlotMgr::IOReap()
 {
     const int max_events = static_cast<int>(m_slots.size());
     struct io_event events[max_events];
@@ -342,7 +342,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::IOReap()
 #endif
     if (ret < 0)
     {
-        return tl::unexpected(zplib::StackError("io_getevents() failed, errno: " + std::to_string(-ret)));
+        return tl::unexpected(StackError("io_getevents() failed, errno: " + std::to_string(-ret)));
     }
     m_logger->debug("Reaped {} IO events.", ret);
     if (ret == 0)
@@ -375,14 +375,14 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::IOReap()
     return {};
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slot)
+tl::expected<void, StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slot)
 {
     if (slot->GetStatus() == IOSlot::Status::WriteReaped)
     {
         auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
         if (!check_res)
         {
-            return tl::unexpected(zplib::StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
+            return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
         }
         slot->SetStatus(IOSlot::Status::Init);
     }
@@ -390,7 +390,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slo
 }
 
 // 现在只有src file size == 0的情况会触发这个函数
-tl::expected<void, zplib::StackError> AIOSlotMgr::CheckCompleteds()
+tl::expected<void, StackError> AIOSlotMgr::CheckCompleteds()
 {
     for (auto slot : m_slots)
     {
@@ -401,7 +401,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::CheckCompleteds()
             auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
             if (!check_res)
             {
-                return tl::unexpected(zplib::StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
+                return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
             }
             slot->SetStatus(IOSlot::Status::Init);
             m_logger->debug("Slot ID: {} reset to Init status after write completion.", slot->GetID());
@@ -413,7 +413,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::CheckCompleteds()
     return {};
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::RunCopyQueue()
+tl::expected<void, StackError> AIOSlotMgr::RunCopyQueue()
 {
 
     while (!mCPFPMgr->ShouldStartCopy())
@@ -438,7 +438,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::RunCopyQueue()
         auto submit_res = SubmitReads();
         if (!submit_res)
         {
-            return tl::unexpected(zplib::StackError("SubmitReads(), err: ", submit_res.error()));
+            return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
         }
 
         m_logger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
@@ -452,20 +452,20 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::RunCopyQueue()
         auto reap_res = IOReap();
         if (!reap_res)
         {
-            return tl::unexpected(zplib::StackError("IOReap(), err: ", reap_res.error()));
+            return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
         }
 
         auto write_res = SubmitWrites();
         if (!write_res)
         {
-            return tl::unexpected(zplib::StackError("SubmitWrites(), err: ", write_res.error()));
+            return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
         }
         m_logger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
 
         // auto check_completed_res = CheckCompleteds();
         // if (!check_completed_res)
         // {
-        //     return tl::unexpected(zplib::StackError("CheckCompleted(), err: ", check_completed_res.error()));
+        //     return tl::unexpected(StackError("CheckCompleted(), err: ", check_completed_res.error()));
         // }
 
         round++;
@@ -476,7 +476,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::RunCopyQueue()
     return {};
 }
 
-tl::expected<void, zplib::StackError> AIOSlotMgr::CheckStuck()
+tl::expected<void, StackError> AIOSlotMgr::CheckStuck()
 {
     // 检查是否只少有一个slot处于ReadSubmitted或者WriteSubmitted状态
     bool isStuck = true;
@@ -492,7 +492,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::CheckStuck()
     if (isStuck && !mCPFPMgr->ShouldStopCopy() && !m_options.EnableInotify)
     {
         m_logger->warn("Detected stuck AIO operations.");
-        return tl::unexpected(zplib::StackError("Detected stuck AIO operations."));
+        return tl::unexpected(StackError("Detected stuck AIO operations."));
     }
 
     return {};

@@ -53,7 +53,7 @@ class AIOSlotMgr
 {
 public:
     AIOSlotMgr(const RWCombinedCopyOptions &options, CPFilePairMgr *file_pair_mgr)
-        : m_options(options), mCPFPMgr(file_pair_mgr), m_logger(zplib::GetGlobalLogger())
+        : m_options(options), mCPFPMgr(file_pair_mgr), m_logger(GetGlobalLogger())
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
@@ -84,26 +84,26 @@ public:
         return m_slots[id];
     }
 
-    tl::expected<void, zplib::StackError> RunCopyQueue();
-    tl::expected<void, zplib::StackError> CheckStuck();
-    void SetFuncDurationStat(zplib::FuncDurationStat *stat)
+    tl::expected<void, StackError> RunCopyQueue();
+    tl::expected<void, StackError> CheckStuck();
+    void SetFuncDurationStat(FuncDurationStat *stat)
     {
         m_func_duration_stat = stat;
     }
 
 private:
-    tl::expected<void, zplib::StackError> Init();
+    tl::expected<void, StackError> Init();
     void PrepareOneRead(AIOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt);
     void PrepareOneWrite(AIOSlot *slot, off_t offset);
-    tl::expected<void, zplib::StackError> SubmitOneRead(AIOSlot *slot);
-    tl::expected<void, zplib::StackError> SubmitOneWrite(AIOSlot *slot);
-    tl::expected<int, zplib::StackError> SubmitReads();
-    tl::expected<int, zplib::StackError> SubmitWrites();
-    tl::expected<void, zplib::StackError> IOReap();
-    tl::expected<void, zplib::StackError> ReapRead(struct io_event *ev);
-    tl::expected<void, zplib::StackError> ReapWrite(struct io_event *ev);
-    tl::expected<void, zplib::StackError> CheckOneCompleted(AIOSlot *slot);
-    tl::expected<void, zplib::StackError> CheckCompleteds();
+    tl::expected<void, StackError> SubmitOneRead(AIOSlot *slot);
+    tl::expected<void, StackError> SubmitOneWrite(AIOSlot *slot);
+    tl::expected<int, StackError> SubmitReads();
+    tl::expected<int, StackError> SubmitWrites();
+    tl::expected<void, StackError> IOReap();
+    tl::expected<void, StackError> ReapRead(struct io_event *ev);
+    tl::expected<void, StackError> ReapWrite(struct io_event *ev);
+    tl::expected<void, StackError> CheckOneCompleted(AIOSlot *slot);
+    tl::expected<void, StackError> CheckCompleteds();
     void PrtSlots();
     void Reset()
     {
@@ -124,7 +124,7 @@ private:
     CPFilePairMgr *mCPFPMgr;
 
     std::shared_ptr<spdlog::logger> m_logger;
-    zplib::FuncDurationStat *m_func_duration_stat;
+    FuncDurationStat *m_func_duration_stat;
 
     // flow control
     int64_t last_read_submit_duration = 0;
@@ -136,8 +136,8 @@ class AIOFileCopy
 public:
     AIOFileCopy(const RWCombinedCopyOptions &options) : m_options(options) {};
 
-    tl::expected<void, zplib::StackError> RunChannel(zplib::FuncDurationStat *stat,
-                                                     Channel<CopyEntry> &channel)
+    tl::expected<void, StackError> RunChannel(FuncDurationStat *stat,
+                                              Channel<CopyEntry> &channel)
     {
         // 根据options.CopyParallelism启动多个RunCopyQueue线程
         m_logger->debug("AIOFileCopy: Starting {} RunCopyQueue threads.", m_options.CopyParallelism);
@@ -169,7 +169,7 @@ public:
             auto add_file_pair_res = cpfpMgr->AddFilePair(copy_entry->srcPath, copy_entry->dstPath);
             if (!add_file_pair_res)
             {
-                return tl::unexpected(zplib::StackError("cpfpMgr.AddFilePair(), err: ", add_file_pair_res.error()));
+                return tl::unexpected(StackError("cpfpMgr.AddFilePair(), err: ", add_file_pair_res.error()));
             }
         }
         // 所有文件对添加完毕，通知各个CPFilePairMgr停止
@@ -193,7 +193,7 @@ public:
     }
 
 private:
-    void startCopyThread(CPFilePairMgr *cpfpMgr, zplib::FuncDurationStat *stat, RWCombinedCopyOptions options)
+    void startCopyThread(CPFilePairMgr *cpfpMgr, FuncDurationStat *stat, RWCombinedCopyOptions options)
     {
         auto sMgr = AIOSlotMgr(options, cpfpMgr);
         sMgr.SetFuncDurationStat(stat);
@@ -206,5 +206,5 @@ private:
 
 private:
     RWCombinedCopyOptions m_options;
-    std::shared_ptr<spdlog::logger> m_logger = zplib::GetGlobalLogger();
+    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
 };

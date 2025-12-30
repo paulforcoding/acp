@@ -53,11 +53,11 @@ public:
     }
     // ctor
     IOSlot(size_t buf_size, int id)
-        : m_buf{zplib::AllocBytes(SECTORSIZE, buf_size)}, m_status{Status::Init}, m_id{id}
+        : m_buf{AllocBytes(SECTORSIZE, buf_size)}, m_status{Status::Init}, m_id{id}
     {
     }
     // dtor
-    virtual ~IOSlot() { zplib::FreeBytes(m_buf); }
+    virtual ~IOSlot() { FreeBytes(m_buf); }
 
     virtual void Reset()
     {
@@ -116,12 +116,12 @@ public:
             m_dst_fd = -1;
         }
     }
-    tl::expected<void, zplib::StackError> CheckAndInit();
-    tl::expected<void, zplib::StackError> TrucateDstToSrcSize()
+    tl::expected<void, StackError> CheckAndInit();
+    tl::expected<void, StackError> TrucateDstToSrcSize()
     {
         if (ftruncate(m_dst_fd, m_src_stat.st_size) < 0)
         {
-            return tl::unexpected(zplib::StackError(
+            return tl::unexpected(StackError(
                 fmt::format("Failed to truncate destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
         }
         return {};
@@ -163,7 +163,7 @@ private:
 
     bool mIsDir = false;
 
-    std::shared_ptr<spdlog::logger> m_logger = zplib::GetGlobalLogger();
+    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
 };
 
 class CPFilePairMgr
@@ -175,7 +175,7 @@ public:
         mReadPtr = mFilePairs.begin();
     }
 
-    tl::expected<void, zplib::StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
+    tl::expected<void, StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
     {
         std::lock_guard<std::mutex> lock(mMutex);
         mFilePairs.push_back(std::make_shared<CPFilePair>(src_path, dst_path, mIOSize));
@@ -188,9 +188,9 @@ public:
         return {};
     }
 
-    tl::expected<std::shared_ptr<CPFilePair>, zplib::StackError> GetNextReadIO();
+    tl::expected<std::shared_ptr<CPFilePair>, StackError> GetNextReadIO();
 
-    tl::expected<void, zplib::StackError> CheckWriteComplete(std::shared_ptr<CPFilePair> writeIt);
+    tl::expected<void, StackError> CheckWriteComplete(std::shared_ptr<CPFilePair> writeIt);
     void SetStopFlag()
     {
         mStopFlag.store(true);
@@ -227,5 +227,5 @@ private:
     std::atomic_bool mStartFlag = false; // whether file pairs have been filled
     std::atomic_bool mStopFlag = false;
 
-    std::shared_ptr<spdlog::logger> m_logger = zplib::GetGlobalLogger();
+    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
 };

@@ -54,7 +54,7 @@ public:
         mCondVar.notify_one();
     }
 
-    tl::expected<std::unique_ptr<T>, zplib::StackError> Pop()
+    tl::expected<std::unique_ptr<T>, StackError> Pop()
     {
         std::unique_lock<std::mutex> lock(mMutex);
         mCondVar.wait(lock, [this]()
@@ -69,11 +69,11 @@ public:
         }
         else if (IsClosed())
         {
-            return tl::unexpected(zplib::StackError("Channel is closed."));
+            return tl::unexpected(StackError("Channel is closed."));
         }
         else
         {
-            return tl::unexpected(zplib::StackError("Unknown error in Channel::Pop()."));
+            return tl::unexpected(StackError("Unknown error in Channel::Pop()."));
         }
     }
 
@@ -93,7 +93,7 @@ public:
         }
         else
         {
-            throw zplib::StackError("Channel closed");
+            throw StackError("Channel closed");
         }
     }
 };
@@ -145,11 +145,11 @@ public:
         }
         else
         {
-            throw zplib::StackError("Channel closed");
+            throw StackError("Channel closed");
         }
     }
 
-    tl::expected<std::string, zplib::StackError> Pop()
+    tl::expected<std::string, StackError> Pop()
     {
         std::unique_lock<std::mutex> lock(mMutex);
         mCondVar.wait(lock, [this]()
@@ -164,11 +164,11 @@ public:
         }
         else if (IsClosed())
         {
-            return tl::unexpected(zplib::StackError("Channel is closed."));
+            return tl::unexpected(StackError("Channel is closed."));
         }
         else
         {
-            return tl::unexpected(zplib::StackError("Unknown error in Channel::Pop()."));
+            return tl::unexpected(StackError("Unknown error in Channel::Pop()."));
         }
     }
 };

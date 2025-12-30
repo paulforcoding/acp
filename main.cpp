@@ -41,16 +41,16 @@ void InitGlobalLogger(const RWCombinedCopyOptions &options)
 {
     if (options.LogMode == "console")
     {
-        zplib::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
+        ::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
     }
     else if (options.LogMode == "file")
     {
-        zplib::InitGlobalFileLogger(options.LogFilePath, spdlog::level::from_str(options.LogLevel));
+        ::InitGlobalFileLogger(options.LogFilePath, spdlog::level::from_str(options.LogLevel));
     }
     else
     {
         // default to console
-        zplib::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
+        ::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
     }
 }
 
@@ -142,7 +142,7 @@ int main(int argc, char *argv[])
         }
     }
 
-    auto logger = zplib::GetGlobalLogger();
+    auto logger = ::GetGlobalLogger();
 
     // deal with inotify if enabled
     InotifyChannel iChan;
@@ -161,7 +161,7 @@ int main(int argc, char *argv[])
         inotifyThread = std::jthread(
             [&inotifyWatcher, &iChan]()
             {
-                auto logger = zplib::GetGlobalLogger();
+                auto logger = ::GetGlobalLogger();
                 while (true)
                 {
                     auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
@@ -176,7 +176,7 @@ int main(int argc, char *argv[])
 
     Channel<CopyEntry> copyChannel(1024);
 
-    auto funcDurationStat = zplib::FuncDurationStat{};
+    auto funcDurationStat = ::FuncDurationStat{};
 
     AIOFileCopy file_copier(options);
     // start a thread to run AIOFileCopy
@@ -186,7 +186,7 @@ int main(int argc, char *argv[])
     auto copy_res = file_copier.RunChannel(&funcDurationStat, copyChannel); 
     if (!copy_res)
     {
-        auto logger = zplib::GetGlobalLogger();
+        auto logger = ::GetGlobalLogger();
         // std::cerr << "File copy failed: " << copy_res.error().what() << std::endl;
         logger->error("File copy failed: {}", copy_res.error().what());        
     } });
