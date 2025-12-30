@@ -13,9 +13,6 @@
 #define ALIGN_MASK(x, mask) (((x) + (mask)) & ~(mask))
 #define ALIGN(x, a) ALIGN_MASK(x, (typeof(x))(a) - 1)
 
-
-
-
 namespace zplib
 {
 
@@ -153,3 +150,5 @@ namespace zplib
         std::shared_ptr<spdlog::logger> m_logger;
     };
 } // namespace zplib
+
+

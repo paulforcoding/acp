@@ -1,11 +1,10 @@
 {
-    "LogLevel": "info",
+    "LogLevel": "debug",
     "LogMode": "console",
     "LogFilePath": "./acp.log",
     "CopyEngine": "AIO",
     "CopyParallelism": 4,
-    "CopyDirMTime": false,
-    "FullCopyBeforeInotify": false,
+    "EnableInotify": true,
     "PreserveSparseFiles": true,
     "CopyOptions": {
         "QueueDepth": 16,

@@ -489,7 +489,7 @@ tl::expected<void, zplib::StackError> AIOSlotMgr::CheckStuck()
         }
     }
 
-    if (isStuck && !mCPFPMgr->ShouldStopCopy())
+    if (isStuck && !mCPFPMgr->ShouldStopCopy() && !m_options.EnableInotify)
     {
         m_logger->warn("Detected stuck AIO operations.");
         return tl::unexpected(zplib::StackError("Detected stuck AIO operations."));

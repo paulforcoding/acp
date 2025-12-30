@@ -45,3 +45,6 @@ acp
 .idea/
 .vscode/
 .github/
+
+# test
+testdata/

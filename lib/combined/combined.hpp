@@ -9,6 +9,12 @@ struct CopyEntry
 {
     std::string srcPath; // full path
     std::string dstPath;
+
+    // 重载一个等号操作符用于DedupQueue的去重功能
+    bool operator==(const CopyEntry &other) const
+    {
+        return (srcPath == other.srcPath) && (dstPath == other.dstPath);
+    }
 };
 
 class IOSlot
@@ -83,8 +89,7 @@ struct RWCombinedCopyOptions
     std::string LogFilePath;
     std::string CopyEngine;
     int CopyParallelism;
-    bool CopyDirMTime;
-    bool FullCopyBeforeInotify;
+    bool EnableInotify;
     bool PreserveSparseFiles;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
     size_t QueueDepth = 8;
@@ -174,7 +179,7 @@ public:
     {
         std::lock_guard<std::mutex> lock(mMutex);
         mFilePairs.push_back(std::make_shared<CPFilePair>(src_path, dst_path, mIOSize));
-        if (mFilePairs.size() == 1 && !mStartFlag.load()) // 下面的动作只在第一个文件对加入时执行
+        if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
         {
             mReadPtr = mFilePairs.begin();
             mStartFlag.store(true);

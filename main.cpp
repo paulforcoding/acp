@@ -5,7 +5,9 @@
 #include <algorithm>
 #include "lib/acp/acp.hpp"
 #include "lib/thirdparty/json.hpp"
+#include "base/base.hpp"
 #include "base/chan.hpp"
+#include "base/inotify.hpp"
 
 std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
 {
@@ -29,8 +31,7 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     options.LogFilePath = data["LogFilePath"];
     options.CopyEngine = data["CopyEngine"];
     options.CopyParallelism = data["CopyParallelism"];
-    options.CopyDirMTime = data["CopyDirMTime"];
-    options.FullCopyBeforeInotify = data["FullCopyBeforeInotify"];
+    options.EnableInotify = data["EnableInotify"];
     options.PreserveSparseFiles = data["PreserveSparseFiles"];
 
     return options;
@@ -141,16 +142,48 @@ int main(int argc, char *argv[])
         }
     }
 
-    Channel<CopyEntry> channel(1024);
+    auto logger = zplib::GetGlobalLogger();
+
+    // deal with inotify if enabled
+    Channel<std::string, std::deque<std::unique_ptr<std::string>>> inotifyChannel(1024);
+    Inotify inotifyWatcher(src_p.string());
+    std::jthread inotifyThread;
+    if (options.EnableInotify && fs::is_directory(src_path) && fs::is_directory(dst_path))
+    {
+
+        auto add_watch_res = inotifyWatcher.Init();
+        if (!add_watch_res)
+        {
+            std::cerr << fmt::format("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().what());
+            return 1;
+        }
+        // start a thread to read inotify events and push to copyChannel
+        inotifyThread = std::jthread(
+            [&inotifyWatcher, &inotifyChannel]()
+            {
+                auto logger = zplib::GetGlobalLogger();
+                while (true)
+                {
+                    auto read_res = inotifyWatcher.ReadEventToChannel(inotifyChannel);
+                    if (!read_res)
+                    {
+
+                        logger->error("Inotify read event failed: {}", read_res.error().what());
+                    }
+                }
+            });
+    }
+
+    Channel<CopyEntry> copyChannel(1024);
 
     auto funcDurationStat = zplib::FuncDurationStat{};
 
     AIOFileCopy file_copier(options);
     // start a thread to run AIOFileCopy
     std::thread file_copy_thread(
-        [&file_copier, &channel, &funcDurationStat]()
+        [&file_copier, &copyChannel, &funcDurationStat]()
         { 
-    auto copy_res = file_copier.RunChannel(&funcDurationStat, channel); 
+    auto copy_res = file_copier.RunChannel(&funcDurationStat, copyChannel); 
     if (!copy_res)
     {
         auto logger = zplib::GetGlobalLogger();
@@ -165,7 +198,7 @@ int main(int argc, char *argv[])
         fs::path src_last_level = fs::path(src_p).filename();
         dst_p = dst_p / src_last_level;
 
-        std::cout << "begin to copy directory: " << src_p.string() << " to directory: " << dst_p.string() << std::endl;
+        logger->warn("begin to copy directory: {} to directory: {}", src_p.string(), dst_p.string());
 
         // create dst_dir if not exist
         if (!fs::exists(dst_p))
@@ -187,28 +220,56 @@ int main(int argc, char *argv[])
             auto copy_entry = std::make_unique<CopyEntry>();
             copy_entry->srcPath = entry.path().string();
             copy_entry->dstPath = dst_file_path.string();
+            logger->debug("pushed file pair: src: {}, dst: {}", copy_entry->srcPath, copy_entry->dstPath);
+            copyChannel.Push(copy_entry);
+        }
 
-            channel.Push(copy_entry);
+        if (options.EnableInotify)
+        {
+            logger->warn("Done copying from: {} to: {}, now monitoring for changes...", src_p.string(), dst_p.string());
+            // read from inotifyChannel and push to copyChannel
+            while (true)
+            {
+                auto pop_res = inotifyChannel.PopUnique();
+                if (!pop_res)
+                {
+                    logger->error("Inotify copyChannel pop failed: {}", pop_res.error().what());
+                    continue;
+                }
+                std::string changed_path = pop_res.value()->c_str();
+                fs::path changed_rel_path = fs::relative(changed_path, src_p);
+                fs::path changed_dst_path = dst_p / changed_rel_path;
+                logger->debug("Detected change in file: {}, scheduling copy to: {}", changed_path, changed_dst_path.string());
+
+                auto copy_entry = std::make_unique<CopyEntry>();
+                copy_entry->srcPath = changed_path;
+                copy_entry->dstPath = changed_dst_path.string();
+                logger->debug("pushed file pair: src: {}, dst: {}", copy_entry->srcPath, copy_entry->dstPath);
+                copyChannel.Push(copy_entry);
+            }
+            // main() never exits normally when inotify is enabled
+            inotifyThread.join();
         }
     }
     else if (fs::is_regular_file(src_path) && fs::is_directory(dst_path)) // copy single file into directory
     {
         fs::path src_last_level = fs::path(src_p).filename();
         dst_p = dst_p / src_last_level;
-        std::cout << "begin to copy file: " << src_p.string() << " to file: " << dst_p.string() << std::endl;
+        logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
 
         auto copy_entry = std::make_unique<CopyEntry>();
         copy_entry->srcPath = src_p.string();
         copy_entry->dstPath = dst_p.string();
-        channel.Push(copy_entry);
+        copyChannel.Push(copy_entry);
     }
     else if (fs::is_regular_file(src_path) && fs::is_regular_file(dst_path)) // single file copy
     {
-        std::cout << "begin to copy file: " << src_p.string() << " to file: " << dst_p.string() << std::endl;
+        logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
+
         auto copy_entry = std::make_unique<CopyEntry>();
         copy_entry->srcPath = src_p.string();
         copy_entry->dstPath = dst_p.string();
-        channel.Push(copy_entry);
+        copyChannel.Push(copy_entry);
     }
     else
     {
@@ -216,7 +277,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    channel.Close();
+    copyChannel.Close();
 
     file_copy_thread.join();
 
