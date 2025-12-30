@@ -27,9 +27,16 @@ $(TARGET): $(OBJECTS)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(OBJECTS) $(TARGET)
+	rm -f $(OBJECTS) $(TARGET) ${TEST_BIN}
 
 distclean: clean
 	rm -f config.h config.mk
 
 .PHONY: all clean distclean check-config
+
+# Test target (requires Catch2 available on include path)
+TEST_SRC := tests/test_channel.cpp
+TEST_BIN := tests/test_channel
+.PHONY: test
+test:
+	$(CXX) $(CXXFLAGS) -I. -o $(TEST_BIN) $(TEST_SRC)

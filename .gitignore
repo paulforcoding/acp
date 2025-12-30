@@ -48,3 +48,4 @@ acp
 
 # test
 testdata/
+tests/test_channel

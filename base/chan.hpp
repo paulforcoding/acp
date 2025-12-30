@@ -1,5 +1,6 @@
 #pragma once
 #include "base/base.hpp"
+#include <tl/expected.hpp>
 #include <condition_variable>
 #include <mutex>
 #include <deque>
