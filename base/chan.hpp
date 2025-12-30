@@ -2,8 +2,10 @@
 #include "base/base.hpp"
 #include <condition_variable>
 #include <mutex>
+#include <deque>
 #include <queue>
 #include <atomic>
+#include <unordered_set>
 
 class CondVarGuard
 {
@@ -19,48 +21,48 @@ private:
     std::condition_variable &m_cv;
 };
 
-template <typename T, typename QType = std::queue<std::unique_ptr<T>>>
+template <typename T>
 class Channel
 {
-private:
+protected:
     static constexpr int CHANNEL_SIZE_DEFAULT = 1;
     static constexpr int MICRO_SLEEP_TIME = 1; // ms
 
-    std::mutex m_mutex;
-    std::condition_variable m_cond_var;
-    // std::queue<std::unique_ptr<T>> m_queue;
-    QType m_queue;
-    const int m_len;
+    std::mutex mMutex;
+    std::condition_variable mCondVar;
+    std::queue<std::unique_ptr<T>> mQueue;
+
+    const int mSize;
     // initialize atomic_flag for C++17 (no default ctor prior to C++20)
-    std::atomic_flag m_done = ATOMIC_FLAG_INIT;
+    std::atomic_flag mDone = ATOMIC_FLAG_INIT;
 
 public:
-    explicit Channel(int len = CHANNEL_SIZE_DEFAULT) : m_len(len) {}
+    explicit Channel(int len = CHANNEL_SIZE_DEFAULT) : mSize(len) {}
 
     int Size() const
     {
-        return m_queue.size();
+        return mQueue.size();
     }
     bool IsClosed() const
     {
-        return m_done.test();
+        return mDone.test();
     }
     void Close()
     {
-        m_done.test_and_set();
-        m_cond_var.notify_one();
+        mDone.test_and_set();
+        mCondVar.notify_one();
     }
 
     tl::expected<std::unique_ptr<T>, zplib::StackError> Pop()
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_cond_var.wait(lock, [this]()
-                        { return !m_queue.empty() || IsClosed(); });
+        std::unique_lock<std::mutex> lock(mMutex);
+        mCondVar.wait(lock, [this]()
+                      { return !mQueue.empty() || IsClosed(); });
 
-        if (!m_queue.empty())
+        if (!mQueue.empty())
         {
-            auto item = std::move(m_queue.front());
-            m_queue.pop();
+            auto item = std::move(mQueue.front());
+            mQueue.pop();
             assert(item != nullptr);
             return std::move(item);
         }
@@ -76,9 +78,9 @@ public:
 
     void Push(std::unique_ptr<T> &item)
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        CondVarGuard cv_guard(m_cond_var);
-        while (m_queue.size() >= static_cast<size_t>(m_len) && !IsClosed())
+        std::unique_lock<std::mutex> lock(mMutex);
+        CondVarGuard cv_guard(mCondVar);
+        while (mQueue.size() >= static_cast<size_t>(mSize) && !IsClosed())
         {
             lock.unlock();
             std::this_thread::sleep_for(std::chrono::milliseconds(MICRO_SLEEP_TIME));
@@ -86,30 +88,59 @@ public:
         }
         if (!IsClosed())
         {
-            m_queue.push(std::move(item));
+            mQueue.push(std::move(item));
         }
         else
         {
             throw zplib::StackError("Channel closed");
         }
     }
+};
 
-    // Push with deduplication, ignore queue size limit, and won't block
-    void PushUnique(std::unique_ptr<T> &item)
+class InotifyChannel
+{
+protected:
+    static constexpr int MICRO_SLEEP_TIME = 1000; // ms
+
+    std::mutex mMutex;
+    std::condition_variable mCondVar;
+    std::deque<std::string> mQueue;
+    std::unordered_set<std::string> mQueueIdx; // for deduplication
+
+    // initialize atomic_flag for C++17 (no default ctor prior to C++20)
+    std::atomic_flag mDone = ATOMIC_FLAG_INIT;
+
+public:
+    explicit InotifyChannel() {}
+
+    int Size() const
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        CondVarGuard cv_guard(m_cond_var);
-        // deduplication check
-        for (auto &existing_item : m_queue)
+        return mQueue.size();
+    }
+    bool IsClosed() const
+    {
+        return mDone.test();
+    }
+    void Close()
+    {
+        mDone.test_and_set();
+        mCondVar.notify_one();
+    }
+    // Push with deduplication, ignore queue size limit, and won't block
+    void Push(std::string_view item)
+    {
+        std::unique_lock<std::mutex> lock(mMutex);
+        CondVarGuard cv_guard(mCondVar);
+        // deduplication check, using unordered_set for O(1) lookup
+        if (mQueueIdx.find(std::string(item)) != mQueueIdx.end())
         {
-            if (*existing_item == *item)
-            {
-                return; // item already exists, do not add
-            }
+            return; // item already exists, do not add
         }
+
         if (!IsClosed())
         {
-            m_queue.push_front(std::move(item));
+            mQueueIdx.insert(std::string(item));
+            mQueue.emplace_back(item);
         }
         else
         {
@@ -117,18 +148,18 @@ public:
         }
     }
 
-    tl::expected<std::unique_ptr<T>, zplib::StackError> PopUnique()
+    tl::expected<std::string, zplib::StackError> Pop()
     {
-        std::unique_lock<std::mutex> lock(m_mutex);
-        m_cond_var.wait(lock, [this]()
-                        { return !m_queue.empty() || IsClosed(); });
+        std::unique_lock<std::mutex> lock(mMutex);
+        mCondVar.wait(lock, [this]()
+                      { return !mQueue.empty() || IsClosed(); });
 
-        if (!m_queue.empty())
+        if (!mQueue.empty())
         {
-            auto item = std::move(m_queue.front());
-            m_queue.pop_back();
-            assert(item != nullptr);
-            return std::move(item);
+            auto item = std::move(mQueue.front());
+            mQueue.pop_front();
+            mQueueIdx.erase(item); // remove from deduplication set
+            return item;
         }
         else if (IsClosed())
         {

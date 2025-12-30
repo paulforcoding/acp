@@ -145,7 +145,7 @@ int main(int argc, char *argv[])
     auto logger = zplib::GetGlobalLogger();
 
     // deal with inotify if enabled
-    Channel<std::string, std::deque<std::unique_ptr<std::string>>> inotifyChannel(1024);
+    InotifyChannel iChan;
     Inotify inotifyWatcher(src_p.string());
     std::jthread inotifyThread;
     if (options.EnableInotify && fs::is_directory(src_path) && fs::is_directory(dst_path))
@@ -159,12 +159,12 @@ int main(int argc, char *argv[])
         }
         // start a thread to read inotify events and push to copyChannel
         inotifyThread = std::jthread(
-            [&inotifyWatcher, &inotifyChannel]()
+            [&inotifyWatcher, &iChan]()
             {
                 auto logger = zplib::GetGlobalLogger();
                 while (true)
                 {
-                    auto read_res = inotifyWatcher.ReadEventToChannel(inotifyChannel);
+                    auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
                     if (!read_res)
                     {
 
@@ -227,16 +227,16 @@ int main(int argc, char *argv[])
         if (options.EnableInotify)
         {
             logger->warn("Done copying from: {} to: {}, now monitoring for changes...", src_p.string(), dst_p.string());
-            // read from inotifyChannel and push to copyChannel
+            // read from iChan and push to copyChannel
             while (true)
             {
-                auto pop_res = inotifyChannel.PopUnique();
+                auto pop_res = iChan.Pop();
                 if (!pop_res)
                 {
                     logger->error("Inotify copyChannel pop failed: {}", pop_res.error().what());
                     continue;
                 }
-                std::string changed_path = pop_res.value()->c_str();
+                std::string changed_path = pop_res.value();
                 fs::path changed_rel_path = fs::relative(changed_path, src_p);
                 fs::path changed_dst_path = dst_p / changed_rel_path;
                 logger->debug("Detected change in file: {}, scheduling copy to: {}", changed_path, changed_dst_path.string());

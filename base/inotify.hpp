@@ -57,7 +57,7 @@ public:
         return {};
     }
 
-    tl::expected<void, zplib::StackError> ReadEventToChannel(Channel<std::string, std::deque<std::unique_ptr<std::string>>> &channel)
+    tl::expected<void, zplib::StackError> ReadEventToChannel(InotifyChannel &channel)
     {
         constexpr size_t EVENT_BUF_LEN = 1024 * (sizeof(struct inotify_event) + 16);
         char buffer[EVENT_BUF_LEN];
@@ -88,9 +88,8 @@ public:
                         m_logger->error("AddWatch failed for new directory {}", file_path.string());
                     }
                 }
-                auto pFilePath = std::make_unique<std::string>(file_path);
-                m_logger->debug("Inotify push: {}", *pFilePath);
-                channel.PushUnique(pFilePath);
+                m_logger->debug("Inotify push: {}", file_path.string());
+                channel.Push(file_path.string());
             }
             i += sizeof(struct inotify_event) + event->len;
         }
