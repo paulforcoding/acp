@@ -55,14 +55,20 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
     return {};
 }
 
-void UIOSlotMgr::PrepareOneWrite(IOSlot *slot, off_t offset)
+void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe(&m_ring);
     auto currCPFPIt = slot->GetCPFPPtr();
-    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), offset, m_options.IoSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
-    io_uring_prep_write(sqe, currCPFPIt->GetDstFd(), slot->GetBuf(), m_options.IoSize, offset);
+    auto [offset, ioSize] = slot->GetIOInfo();
+    if (m_options.DirectIO)
+    {
+        ioSize = m_options.IoSize;
+    }
+    io_uring_prep_write(sqe, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize, offset);
+    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                    slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+
     io_uring_sqe_set_data(sqe, slot);
 
     slot->SetStatus(IOSlot::Status::WritePrepared);
@@ -126,8 +132,8 @@ tl::expected<void, StackError> UIOSlotMgr::ReapRead(IOSlot *slot, io_uring_cqe *
     m_logger->debug("UIO read completed for slot ID: {}, bytes read: {}", slot->GetID(), res);
     // prepare write with same offset
     // extract offset from cqe not available; use slot's IOInfo
-
-    PrepareOneWrite(slot, offset);
+    slot->SetIOInfo(offset, static_cast<size_t>(res));
+    PrepareOneWrite(slot);
     return {};
 }
 
@@ -143,7 +149,7 @@ tl::expected<void, StackError> UIOSlotMgr::ReapWrite(IOSlot *slot, io_uring_cqe 
         if (res == -EAGAIN)
         {
             m_logger->warn("UIO write got EAGAIN, resubmitting for slot ID: {}, res: {}", slot->GetID(), res);
-            PrepareOneWrite(slot, /*offset*/ 0);
+            PrepareOneWrite(slot);
             return {};
         }
         return tl::unexpected(StackError(fmt::format("UIO write failed, errno: {}, errstr: {}", res, strerror(-res))));
@@ -151,7 +157,9 @@ tl::expected<void, StackError> UIOSlotMgr::ReapWrite(IOSlot *slot, io_uring_cqe 
 
     if (res == 0)
     {
-        return tl::unexpected(StackError("UIO write returned 0 bytes written, unexpected."));
+        return tl::unexpected(StackError(
+            fmt::format("UIO write returned 0 bytes written, unexpected. src: {}, dst: {}",
+                        slot->GetCPFPPtr()->GetSrcPath(), slot->GetCPFPPtr()->GetDstPath())));
     }
 
     auto currCPFPIt = slot->GetCPFPPtr();

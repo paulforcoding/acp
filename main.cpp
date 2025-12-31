@@ -31,6 +31,7 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     options.LogFilePath = data["LogFilePath"];
     options.CopyEngine = data["CopyEngine"];
     options.CopyParallelism = data["CopyParallelism"];
+    options.DirectIO = data["DirectIO"];
     options.EnableInotify = data["EnableInotify"];
     options.PreserveSparseFiles = data["PreserveSparseFiles"];
 

@@ -25,7 +25,7 @@ public:
 private:
     tl::expected<void, StackError> Init() override;
     void PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt) override;
-    void PrepareOneWrite(IOSlot *slot, off_t offset) override;
+    void PrepareOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> IOReap() override;

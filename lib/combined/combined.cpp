@@ -1,8 +1,8 @@
 #include <filesystem>
 #include "lib/combined/combined.hpp"
 
-CPFilePair::CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size)
-    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size)
+CPFilePair::CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size, bool direct_io, bool sync_writes)
+    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes)
 {
     bzero(&m_src_stat, sizeof(struct stat));
     bzero(&m_dst_stat, sizeof(struct stat));
@@ -58,7 +58,15 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     // check source file
     m_logger->trace("Opening source file: {}", m_src_path);
-    m_src_fd = open(m_src_path.c_str(), O_RDONLY | O_DIRECT);
+    if (mDirectIO)
+    {
+        m_src_fd = open(m_src_path.c_str(), O_RDONLY | O_DIRECT);
+    }
+    else
+    {
+        m_src_fd = open(m_src_path.c_str(), O_RDONLY);
+    }
+
     if (m_src_fd < 0)
     {
         return tl::unexpected(StackError(
@@ -89,7 +97,15 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     m_logger->trace("Opening/creating destination file: {}", m_dst_path);
     // check destination file
-    m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_DIRECT | O_TRUNC, 0644);
+    if (mDirectIO)
+    {
+        m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_DIRECT | O_TRUNC, 0644);
+    }
+    else
+    {
+        m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    }
+
     if (m_dst_fd < 0)
     {
         return tl::unexpected(StackError(
@@ -224,10 +240,21 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
     if (pFP->IsWriteFinished())
     {
-        auto truncate_res = pFP->TrucateDstToSrcSize();
-        if (!truncate_res)
+        if (m_options.DirectIO)
         {
-            return tl::unexpected(StackError("pFP->TrucateDstToSrcSize(), err: ", truncate_res.error()));
+            auto truncate_res = pFP->TrucateDstToSrcSize();
+            if (!truncate_res)
+            {
+                return tl::unexpected(StackError("pFP->TrucateDstToSrcSize(), err: ", truncate_res.error()));
+            }
+        }
+        if (m_options.SyncWrites && pFP->GetDstFileSize() > 0)
+        {
+            auto fsync_res = pFP->FsyncDst();
+            if (!fsync_res)
+            {
+                return tl::unexpected(StackError("pFP->FsyncDst(), err: ", fsync_res.error()));
+            }
         }
 
         // 如果有其他结尾要做的事情，比如copy file attributes，可以在这里做

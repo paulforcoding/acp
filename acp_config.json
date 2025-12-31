@@ -6,6 +6,8 @@
     "CopyParallelism": 1,
     "EnableInotify": false,
     "PreserveSparseFiles": true,
+    "DirectIO": false,
+    "SyncWrites": false,
     "CopyOptions": {
         "QueueDepth": 8,
         "IOSize": 1048576,

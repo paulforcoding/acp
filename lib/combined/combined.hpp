@@ -136,6 +136,8 @@ struct RWCombinedCopyOptions
     int CopyParallelism;
     bool EnableInotify;
     bool PreserveSparseFiles;
+    bool DirectIO = false;
+    bool SyncWrites = false;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
     size_t QueueDepth = 8;
     int Batch = 4;
@@ -147,7 +149,7 @@ struct RWCombinedCopyOptions
 class CPFilePair
 {
 public:
-    CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size); // full path expected
+    CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size, bool direct_io, bool sync_writes); // full path expected
     ~CPFilePair()
     {
         if (m_src_fd >= 0)
@@ -173,6 +175,17 @@ public:
         }
         return {};
     }
+    tl::expected<void, StackError> FsyncDst()
+    {
+        m_logger->trace("Fsyncing destination file: {}", m_dst_path);
+        if (fsync(m_dst_fd) < 0)
+        {
+            return tl::unexpected(StackError(
+                fmt::format("Failed to fsync destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
+        }
+        return {};
+    }
+
     int GetSrcFd() const { return m_src_fd; }
     int GetDstFd() const { return m_dst_fd; }
     size_t GetSrcFileSize() const { return static_cast<size_t>(m_src_stat.st_size); }
@@ -207,6 +220,8 @@ private:
     size_t mReadBytes = 0;
     size_t mWrittenBytes = 0;
     size_t mIOSize = 0;
+    bool mDirectIO = false;
+    bool mSyncWrites = false;
 
     bool mIsDir = false;
 
@@ -217,7 +232,7 @@ class CPFilePairMgr
 {
 public:
     // make sure at lease we got one elem in mFilePairs
-    CPFilePairMgr(size_t ioSize) : mIOSize(ioSize)
+    CPFilePairMgr(const RWCombinedCopyOptions &options) : m_options(options)
     {
         mReadPtr = mFilePairs.begin();
     }
@@ -225,7 +240,7 @@ public:
     tl::expected<void, StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        mFilePairs.push_back(std::make_shared<CPFilePair>(src_path, dst_path, mIOSize));
+        mFilePairs.push_back(std::make_shared<CPFilePair>(src_path, dst_path, m_options.IoSize, m_options.DirectIO, m_options.SyncWrites));
         if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
         {
             mReadPtr = mFilePairs.begin();
@@ -271,7 +286,7 @@ private:
     std::list<std::shared_ptr<CPFilePair>> mFilePairs;
     DedupList<CPFilePair> mInflightFPs;
 
-    size_t mIOSize = 0;
+    RWCombinedCopyOptions m_options;
     std::mutex mMutex; // to protect mFilePairs, mReadPtr, mWritePtr in multithreaded scenarios
     std::list<std::shared_ptr<CPFilePair>>::iterator mReadPtr;
 
@@ -355,11 +370,11 @@ public:
 
             m_logger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
 
-            auto check_stuck_res = CheckStuck();
-            if (!check_stuck_res)
-            {
-                return tl::unexpected(check_stuck_res.error());
-            }
+            // auto check_stuck_res = CheckStuck();
+            // if (!check_stuck_res)
+            // {
+            //     return tl::unexpected(check_stuck_res.error());
+            // }
 
             auto reap_res = IOReap();
             if (!reap_res)
@@ -558,7 +573,7 @@ protected:
 private:
     virtual tl::expected<void, StackError> Init() = 0;
     virtual void PrepareOneRead(SlotType *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt) = 0;
-    virtual void PrepareOneWrite(SlotType *slot, off_t offset) = 0;
+    virtual void PrepareOneWrite(SlotType *slot) = 0;
     virtual tl::expected<void, StackError> SubmitOneRead(SlotType *slot) = 0;
     virtual tl::expected<void, StackError> SubmitOneWrite(SlotType *slot) = 0;
     virtual tl::expected<void, StackError> IOReap() = 0;

@@ -19,7 +19,7 @@ public:
 
         for (int i = 0; i < m_options.CopyParallelism; ++i)
         {
-            cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(m_options.IoSize));
+            cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(m_options));
             threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get(), stat, m_options);
         }
         // 主线程负责从channel中取出CopyEntry，分发到各个CPFilePairMgr中
@@ -96,7 +96,7 @@ private:
         {
             slotMgr = std::make_unique<AIOSlotMgr>(options, cpfpMgr);
         }
-        
+
         slotMgr->SetFuncDurationStat(stat);
         auto run_res = slotMgr->RunCopyQueue();
         if (!run_res)

@@ -91,14 +91,21 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
     return {};
 }
 
-void AIOSlotMgr::PrepareOneWrite(IOSlot *slot, off_t offset)
+void AIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
     auto iocb{slot->InitWriteIOCB()};
     auto currCPFPIt = slot->GetCPFPPtr();
-    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), offset, m_options.IoSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
-    io_prep_pwrite(iocb, currCPFPIt->GetDstFd(), slot->GetBuf(), m_options.IoSize,
+
+    auto [offset, ioSize] = slot->GetIOInfo();
+    if (m_options.DirectIO)
+    {
+        ioSize = m_options.IoSize;
+    }
+    io_prep_pwrite(iocb, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize,
                    offset);
+    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                    slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+
     iocb->data = slot;
     // iocb->aio_rw_flags |= RWF_NOWAIT;
     slot->SetStatus(IOSlot::Status::WritePrepared);
@@ -178,14 +185,13 @@ tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
         return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
     }
 
-    
-
     m_logger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
                     slot->GetID(), cb->u.c.offset, io_ret, static_cast<void *>(cb));
 
     // prepare write io
     off_t write_offset = cb->u.c.offset; // same offset as read
-    PrepareOneWrite(slot, write_offset);
+    slot->SetIOInfo(write_offset, static_cast<size_t>(io_ret));
+    PrepareOneWrite(slot);
 
     return {};
 }
@@ -210,7 +216,7 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
             m_logger->warn("AIO write got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
                            slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
             PrtSlots();
-            PrepareOneWrite(slot, cb->u.c.offset);
+            PrepareOneWrite(slot);
             return {}; // let SubmitWrites handle resubmission in next round, this will let read IO go first
         }
         return tl::unexpected(StackError(
