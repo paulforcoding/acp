@@ -1,13 +1,13 @@
 {
-    "LogLevel": "debug",
+    "LogLevel": "info",
     "LogMode": "console",
     "LogFilePath": "./acp.log",
-    "CopyEngine": "libaio",
-    "CopyParallelism": 4,
-    "EnableInotify": true,
+    "CopyEngine": "liburing",
+    "CopyParallelism": 1,
+    "EnableInotify": false,
     "PreserveSparseFiles": true,
     "CopyOptions": {
-        "QueueDepth": 16,
+        "QueueDepth": 8,
         "IOSize": 1048576,
         "Batch": 8,
         "IOReapWait": 1

@@ -3,7 +3,7 @@
 #include <string>
 #include <filesystem>
 #include <algorithm>
-#include "lib/acp/acp.hpp"
+#include "lib/copy/copy.hpp"
 #include "lib/thirdparty/json.hpp"
 #include "base/base.hpp"
 #include "base/chan.hpp"
@@ -178,8 +178,8 @@ int main(int argc, char *argv[])
 
     auto funcDurationStat = ::FuncDurationStat{};
 
-    AIOFileCopy file_copier(options);
-    // start a thread to run AIOFileCopy
+    CopyEngine file_copier(options);
+    // start a thread to run CopyEngine
     std::thread file_copy_thread(
         [&file_copier, &copyChannel, &funcDurationStat]()
         { 

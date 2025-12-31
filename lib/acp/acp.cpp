@@ -18,12 +18,12 @@ tl::expected<void, StackError> AIOSlotMgr::Init()
     return {};
 }
 
-void AIOSlotMgr::PrepareOneRead(AIOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt)
+void AIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt)
 {
     auto iocb{slot->InitReadIOCB()};
     size_t io_size = m_options.IoSize;
 
-    m_logger->debug("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, iocb addr: {:p}, src: {}, dst: {}",
+    m_logger->trace("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, iocb addr: {:p}, src: {}, dst: {}",
                     slot->GetID(), offset, io_size, static_cast<void *>(iocb),
                     currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
     io_prep_pread(iocb, currCPFPIt->GetSrcFd(), slot->GetBuf(), io_size, offset);
@@ -32,9 +32,10 @@ void AIOSlotMgr::PrepareOneRead(AIOSlot *slot, off_t offset, std::shared_ptr<CPF
     slot->SetCPFPPtr(currCPFPIt);
     slot->SetStatus(IOSlot::Status::ReadPrepared);
     currCPFPIt->UpdateReadBytes(io_size);
+    mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
     return;
 }
-tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
+tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
 {
     // m_logger->debug("Submitting read IO for slot ID: {}", slot->GetID());
 
@@ -67,7 +68,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
     auto start = std::chrono::high_resolution_clock::now();
     int ret = io_submit(m_io_ctx, 1, iocbs);
     auto end = std::chrono::high_resolution_clock::now();
-    AddDurationWarn("io_submit(read)", start, end, 100); // warn if >100ms
+    AddDuration("io_submit(read)", start, end);
 #else
     int ret = io_submit(m_io_ctx, 1, iocbs);
 #endif
@@ -90,61 +91,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(AIOSlot *slot)
     return {};
 }
 
-tl::expected<int, StackError> AIOSlotMgr::SubmitReads()
-{
-    // TODO: change to batch submit later
-    int submitted = 0;
-
-    for (auto slot : m_slots)
-    {
-        auto next_res = mCPFPMgr->GetNextReadIO();
-
-        if (!next_res)
-        {
-            return tl::unexpected(StackError("mCPFPMgr->GetNextReadIO(), err: ", next_res.error()));
-        }
-
-        auto nextIO = next_res.value();
-
-        if (nextIO == nullptr)
-        {
-            m_logger->debug("All read IOs have been submitted.");
-            break; // all io submitted
-        }
-
-        // prepare read io
-        if (slot->GetStatus() == IOSlot::Status::Init)
-        {
-            size_t offset = nextIO->GetReadOffset();
-            PrepareOneRead(slot, offset, nextIO);
-        }
-
-        // submit prepared read io
-        if (slot->GetStatus() == IOSlot::Status::ReadPrepared)
-        {
-            auto res = SubmitOneRead(slot);
-            if (!res)
-            {
-                // if EAGAIN, break and try again later
-                if (res.error() == StackError("EAGAIN"))
-                {
-                    m_logger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
-                    PrtSlots();
-                    break;
-                }
-                return tl::unexpected(res.error());
-            }
-            else
-            {
-                submitted++;
-            }
-        }
-    }
-
-    return submitted;
-}
-
-void AIOSlotMgr::PrepareOneWrite(AIOSlot *slot, off_t offset)
+void AIOSlotMgr::PrepareOneWrite(IOSlot *slot, off_t offset)
 {
     auto iocb{slot->InitWriteIOCB()};
     auto currCPFPIt = slot->GetCPFPPtr();
@@ -158,7 +105,7 @@ void AIOSlotMgr::PrepareOneWrite(AIOSlot *slot, off_t offset)
     return;
 }
 
-tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
+tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
 {
     assert(slot->GetStatus() == IOSlot::Status::WritePrepared);
     auto iocb = slot->GetWriteIOCB();
@@ -176,7 +123,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
     auto start = std::chrono::high_resolution_clock::now();
     int ret = io_submit(m_io_ctx, 1, iocbs);
     auto end = std::chrono::high_resolution_clock::now();
-    AddDurationWarn("io_submit(write)", start, end, 100); // warn if >100ms
+    AddDuration("io_submit(write)", start, end); // warn if >100ms
 #else
     int ret = io_submit(m_io_ctx, 1, iocbs);
 #endif
@@ -201,47 +148,13 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(AIOSlot *slot)
     return {};
 }
 
-// 使用RWF_NOWAIT标志提交写请求会多此一个步骤
-tl::expected<int, StackError> AIOSlotMgr::SubmitWrites()
-{
-    // TODO: change to batch submit later
-    int submitted = 0;
-
-    // 找出所有可以提交写请求的slot并提交写请求
-    for (auto slot : m_slots)
-    {
-        // prepare write io
-        if (slot->GetStatus() == IOSlot::Status::WritePrepared)
-        {
-
-            auto res = SubmitOneWrite(slot);
-            if (!res)
-            {
-                // if EAGAIN, break and try again later
-                if (res.error() == StackError("EAGAIN"))
-                {
-                    m_logger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
-                    PrtSlots();
-                    break;
-                }
-                return tl::unexpected(res.error());
-            }
-            else
-            {
-                submitted++;
-            }
-        }
-    }
-    return submitted;
-}
-
 // reap read IO and submit write IO with current IOSlot's buffer
 tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
 {
 
     ssize_t io_ret = ev->res;
     struct iocb *cb = ev->obj;
-    AIOSlot *slot = static_cast<AIOSlot *>(ev->data);
+    IOSlot *slot = static_cast<IOSlot *>(ev->data);
     assert(slot->GetStatus() == IOSlot::Status::ReadSubmitted);
     slot->SetStatus(IOSlot::Status::ReadReaped);
 
@@ -265,6 +178,8 @@ tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
         return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
     }
 
+    
+
     m_logger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
                     slot->GetID(), cb->u.c.offset, io_ret, static_cast<void *>(cb));
 
@@ -279,7 +194,7 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
 {
 
     ssize_t io_ret = ev->res;
-    AIOSlot *slot = static_cast<AIOSlot *>(ev->data);
+    IOSlot *slot = static_cast<IOSlot *>(ev->data);
     struct iocb *cb = ev->obj;
     auto currCPFPIt = slot->GetCPFPPtr();
 
@@ -311,7 +226,6 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
                     slot->GetID(), cb->u.c.offset, io_ret, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
     currCPFPIt->UpdateWrittenBytes(io_ret);
-    slot->SetStatus(IOSlot::Status::WriteReaped);
 
     auto check_res = CheckOneCompleted(slot);
     if (!check_res)
@@ -336,7 +250,7 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     int ret = io_getevents(m_io_ctx, 1, max_events, events,
                            &timeout);
     auto end = std::chrono::high_resolution_clock::now();
-    AddDurationWarn("io_getevents()", start, end, 10); // warn if >10ms
+    AddDuration("io_getevents()", start, end); // warn if >10ms
 #else
     int ret = io_getevents(m_io_ctx, 1, max_events, events, &timeout);
 #endif
@@ -375,167 +289,16 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     return {};
 }
 
-tl::expected<void, StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slot)
-{
-    if (slot->GetStatus() == IOSlot::Status::WriteReaped)
-    {
-        auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
-        if (!check_res)
-        {
-            return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
-        }
-        slot->SetStatus(IOSlot::Status::Init);
-    }
-    return {};
-}
-
-// 现在只有src file size == 0的情况会触发这个函数
-tl::expected<void, StackError> AIOSlotMgr::CheckCompleteds()
-{
-    for (auto slot : m_slots)
-    {
-        m_logger->debug("Checking slot ID: {} with status: {}",
-                        slot->GetID(), IOSlot::StatusToStr(slot->GetStatus()));
-        if (slot->GetStatus() == IOSlot::Status::WriteReaped)
-        {
-            auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
-            if (!check_res)
-            {
-                return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
-            }
-            slot->SetStatus(IOSlot::Status::Init);
-            m_logger->debug("Slot ID: {} reset to Init status after write completion.", slot->GetID());
-        }
-        m_logger->debug("Slot ID: {} final status after CheckCompleted: {}",
-                        slot->GetID(), IOSlot::StatusToStr(slot->GetStatus()));
-    }
-    m_logger->debug("Completed checking all slots.");
-    return {};
-}
-
-tl::expected<void, StackError> AIOSlotMgr::RunCopyQueue()
-{
-
-    while (!mCPFPMgr->ShouldStartCopy())
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        if (mCPFPMgr->ShouldStopCopy())
-        {
-            m_logger->debug("Received stop signal before starting copy queue.");
-            return {};
-        }
-    }
-
-    auto init_res = Init();
-    if (!init_res)
-    {
-        return tl::unexpected(init_res.error());
-    }
-
-    long round = 0;
-    while (!mCPFPMgr->ShouldStopCopy())
-    {
-        auto submit_res = SubmitReads();
-        if (!submit_res)
-        {
-            return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
-        }
-
-        m_logger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
-
-        auto check_stuck_res = CheckStuck();
-        if (!check_stuck_res)
-        {
-            return tl::unexpected(check_stuck_res.error());
-        }
-
-        auto reap_res = IOReap();
-        if (!reap_res)
-        {
-            return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
-        }
-
-        auto write_res = SubmitWrites();
-        if (!write_res)
-        {
-            return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
-        }
-        m_logger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
-
-        // auto check_completed_res = CheckCompleteds();
-        // if (!check_completed_res)
-        // {
-        //     return tl::unexpected(StackError("CheckCompleted(), err: ", check_completed_res.error()));
-        // }
-
-        round++;
-    }
-
-    Reset();
-
-    return {};
-}
-
-tl::expected<void, StackError> AIOSlotMgr::CheckStuck()
-{
-    // 检查是否只少有一个slot处于ReadSubmitted或者WriteSubmitted状态
-    bool isStuck = true;
-    for (auto slot : m_slots)
-    {
-        if (slot->GetStatus() == IOSlot::Status::ReadSubmitted || slot->GetStatus() == IOSlot::Status::WriteSubmitted)
-        {
-            isStuck = false;
-            break;
-        }
-    }
-
-    if (isStuck && !mCPFPMgr->ShouldStopCopy() && !m_options.EnableInotify)
-    {
-        m_logger->warn("Detected stuck AIO operations.");
-        return tl::unexpected(StackError("Detected stuck AIO operations."));
-    }
-
-    return {};
-}
-
-void AIOSlotMgr::PrtSlots()
-{
-    m_logger->warn("Current IOSlot statuses:");
-    // 按状态统计slot数量，并打印每个状态slot的数量
-    std::map<IOSlot::Status, int> status_count;
-    for (auto slot : m_slots)
-    {
-        status_count[slot->GetStatus()]++;
-    }
-
-    for (const auto &pair : status_count)
-    {
-        m_logger->warn("Slot Status: {}, Count: {}", IOSlot::StatusToStr(pair.first), pair.second);
-    }
-}
-
-void AIOSlotMgr::AddDurationWarn(std::string_view func_name, std::chrono::_V2::system_clock::time_point start,
-                                 std::chrono::_V2::system_clock::time_point end, int64_t warn_threshold)
-{
-    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    if (duration > warn_threshold)
-    {
-
-        m_logger->warn("Function {} took {} ms, exceeding threshold {} ms",
-                       func_name, duration, warn_threshold);
-        PrtSlots();
-    }
-    if (m_func_duration_stat)
-    {
-        m_func_duration_stat->AddDuration(func_name, duration);
-    }
-
-    if (func_name == "io_submit(read)")
-    {
-        last_read_submit_duration = duration;
-    }
-    else if (func_name == "io_submit(write)")
-    {
-        last_write_submit_duration = duration;
-    }
-};
+// tl::expected<void, StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slot)
+// {
+//     if (slot->GetStatus() == IOSlot::Status::WriteReaped)
+//     {
+//         auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
+//         if (!check_res)
+//         {
+//             return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
+//         }
+//         slot->SetStatus(IOSlot::Status::Init);
+//     }
+//     return {};
+// }

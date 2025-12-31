@@ -22,7 +22,7 @@ private:
     std::condition_variable &m_cv;
 };
 
-template <typename T>
+template <typename ElemType>
 class Channel
 {
 protected:
@@ -31,7 +31,7 @@ protected:
 
     std::mutex mMutex;
     std::condition_variable mCondVar;
-    std::queue<std::unique_ptr<T>> mQueue;
+    std::queue<std::unique_ptr<ElemType>> mQueue;
 
     const int mSize;
     // initialize atomic_flag for C++17 (no default ctor prior to C++20)
@@ -54,7 +54,7 @@ public:
         mCondVar.notify_one();
     }
 
-    tl::expected<std::unique_ptr<T>, StackError> Pop()
+    tl::expected<std::unique_ptr<ElemType>, StackError> Pop()
     {
         std::unique_lock<std::mutex> lock(mMutex);
         mCondVar.wait(lock, [this]()
@@ -77,7 +77,7 @@ public:
         }
     }
 
-    void Push(std::unique_ptr<T> &item)
+    void Push(std::unique_ptr<ElemType> &item)
     {
         std::unique_lock<std::mutex> lock(mMutex);
         CondVarGuard cv_guard(mCondVar);
@@ -170,5 +170,49 @@ public:
         {
             return tl::unexpected(StackError("Unknown error in Channel::Pop()."));
         }
+    }
+};
+
+template <typename ElemType>
+class DedupList
+{
+protected:
+    std::list<std::shared_ptr<ElemType>> mList;
+    std::unordered_set<std::string> mQueueIdx; // for deduplication
+
+public:
+    explicit DedupList() {}
+
+    int Size() const
+    {
+        return mList.size();
+    }
+    bool Empty() const
+    {
+        return mList.empty();
+    }
+
+    // Push with deduplication, ignore queue size limit, and won't block
+    void Push(std::shared_ptr<ElemType> &item, std::string_view key)
+    {
+        // deduplication check, using unordered_set for O(1) lookup
+        if (mQueueIdx.find(std::string(key)) != mQueueIdx.end())
+        {
+            return; // item already exists, do not add
+        }
+
+        mQueueIdx.insert(std::string(key));
+        mList.emplace_back(item);
+    }
+
+    void Remove(std::shared_ptr<ElemType> &item, std::string_view key)
+    {
+        mQueueIdx.erase(std::string(key));
+        mList.remove(item);
+    }
+
+    const std::list<std::shared_ptr<ElemType>> &GetList()
+    {
+        return mList;
     }
 };

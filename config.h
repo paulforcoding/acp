@@ -12,6 +12,6 @@
 #define HAVE_SPDLOG 1
 
 /* liburing support (optional) */
-#define HAVE_LIBURING 0
+#define HAVE_LIBURING 1
 
 #endif

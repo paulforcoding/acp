@@ -12,6 +12,7 @@ NC='\033[0m' # No Color
 ENABLE_URING=0
 CXX=${CXX:-g++}
 CXXFLAGS=${CXXFLAGS:--g -std=c++20 -Wall -Wextra -O2}
+SOURCES = main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -198,10 +199,12 @@ cat > config.mk << 'EOF'
 CXX ?= g++
 CXXFLAGS = -g -std=c++20 -Wall -Wextra -I. -O2
 LDFLAGS = -laio
+SOURCES = main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
 EOF
 
 if [ $ENABLE_URING -eq 1 ]; then
     echo "LDFLAGS += -luring" >> config.mk
+    echo "SOURCES += lib/ucp/ucp.cpp" >> config.mk
 fi
 
 cat >> config.mk << 'EOF'

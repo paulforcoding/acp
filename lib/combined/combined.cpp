@@ -57,6 +57,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     }
 
     // check source file
+    m_logger->trace("Opening source file: {}", m_src_path);
     m_src_fd = open(m_src_path.c_str(), O_RDONLY | O_DIRECT);
     if (m_src_fd < 0)
     {
@@ -86,6 +87,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
         }
     }
 
+    m_logger->trace("Opening/creating destination file: {}", m_dst_path);
     // check destination file
     m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_DIRECT | O_TRUNC, 0644);
     if (m_dst_fd < 0)
@@ -166,23 +168,52 @@ AGAIN:
 
     if ((*mReadPtr)->IsReadFinished())
     {
-        mInflightFPs.push_back(*mReadPtr);
-        m_logger->trace("Finished read file pair from mFilePairs, src: {}, dst: {}, remaining pairs: {}",
-                        (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), mFilePairs.size());
-        // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
-        if ((*mReadPtr)->IsInitialized() && (*mReadPtr)->GetSrcFileSize() == 0)
-        {
-            CheckWriteComplete(*mReadPtr); // directly check write complete for 0-size files
-        }
+        CheckReadCompleteNoLock(*mReadPtr);
 
-        mFilePairs.erase(mReadPtr); // mReadPtr指向的元素被移除后，mReadPtr就不再准确了，需要重新指向begin()
-        mReadPtr = mFilePairs.begin();
         goto AGAIN;
         // make sure to return a initialized and not-finished file pair,
         // and make sure 0-size files are get popped from mFilePairs to mInflightFPs
     }
-    m_logger->debug("GetNextReadIO() return, src: {}, dst: {}", (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
+    m_logger->debug("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
+                    (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), (*mReadPtr)->GetReadOffset());
     return *mReadPtr;
+}
+
+void CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+
+    if (pFP->IsReadFinished())
+    {
+        CheckReadCompleteNoLock(pFP);
+    }
+}
+
+void CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
+{
+    mInflightFPs.Push(pFP, pFP->GetSrcPath());
+
+    m_logger->debug("Completed reading file pair: src: {}, dst: {}, size: {}, inflight pairs: {}",
+                    pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
+    // if (mInflightFPs.Size() > 18)
+    // {
+    //     for (const auto &fp : mInflightFPs.GetList())
+    //     {
+    //         m_logger->info("  Inflight src: {}, dst: {}", fp->GetSrcPath(), fp->GetDstPath());
+    //     }
+    //     assert(false);
+    // }
+
+    // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
+    if ((pFP)->IsInitialized() && (pFP)->GetSrcFileSize() == 0)
+    {
+        m_logger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
+                        (pFP)->GetSrcPath(), (pFP)->GetDstPath());
+        CheckWriteComplete(pFP); // directly check write complete for 0-size files
+    }
+
+    mFilePairs.erase(mReadPtr); // mReadPtr指向的元素被移除后，mReadPtr就不再准确了，需要重新指向begin()
+    mReadPtr = mFilePairs.begin();
 }
 
 tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr<CPFilePair> pFP)
@@ -201,18 +232,10 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
         // 如果有其他结尾要做的事情，比如copy file attributes，可以在这里做
 
-        m_logger->debug("Completed copying file pair: src: {}, dst: {}, size: {}",
-                        pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize());
+        m_logger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
+                        pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
         // 从inflight列表中移除
-
-        mInflightFPs.remove(pFP);
-
-        m_logger->debug("Inflight file pairs remaining: {}", mInflightFPs.size());
-        // print current inflight file pairs for debug
-        for (const auto &fp : mInflightFPs)
-        {
-            m_logger->debug("  Inflight src: {}, dst: {}", fp->GetSrcPath(), fp->GetDstPath());
-        }
+        mInflightFPs.Remove(pFP, pFP->GetSrcPath());
     }
     return {};
 }
