@@ -2,7 +2,7 @@
     "LogLevel": "debug",
     "LogMode": "console",
     "LogFilePath": "./acp.log",
-    "CopyEngine": "AIO",
+    "CopyEngine": "libaio",
     "CopyParallelism": 4,
     "EnableInotify": true,
     "PreserveSparseFiles": true,

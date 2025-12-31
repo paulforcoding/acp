@@ -17,6 +17,8 @@ struct CopyEntry
     }
 };
 
+class CPFilePair;
+
 class IOSlot
 {
 public:
@@ -74,12 +76,16 @@ public:
     void SetStatus(Status s) { m_status = s; }
     void SetUserData(const std::any &data) { m_user_data = data; }
 
+    std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
+    void SetCPFPPtr(std::shared_ptr<CPFilePair> it) { mCPFPIt = it; }
+
 private:
     // data fields
     char *m_buf = nullptr;
     Status m_status = Status::Init;
     int m_id = -1;        // its id, also index in IOSlotMgr's m_slots
     std::any m_user_data; // user data field
+    std::shared_ptr<CPFilePair> mCPFPIt;
 };
 
 struct RWCombinedCopyOptions

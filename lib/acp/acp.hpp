@@ -40,13 +40,12 @@ public:
         return &m_iocb_write;
     }
 
-    std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
-    void SetCPFPPtr(std::shared_ptr<CPFilePair> it) { mCPFPIt = it; }
+    
 
 private:
     struct iocb m_iocb_read;  // 读iocb
     struct iocb m_iocb_write; // 写iocb
-    std::shared_ptr<CPFilePair> mCPFPIt;
+    
 };
 
 class AIOSlotMgr
