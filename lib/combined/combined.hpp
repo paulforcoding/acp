@@ -64,11 +64,19 @@ public:
     // dtor
     virtual ~IOSlot() { FreeBytes(m_buf); }
 
+    // disable copy and move to avoid accidental double-free or ownership transfer
+    IOSlot(const IOSlot &) = delete;
+    IOSlot &operator=(const IOSlot &) = delete;
+    IOSlot(IOSlot &&) = delete;
+    IOSlot &operator=(IOSlot &&) = delete;
+
     virtual void Reset()
     {
         m_status = Status::Init;
         // bzero(m_buf, SECTORSIZE);
         m_user_data = {};
+        // clear IO tracking
+        mIOInfo = IOInfo{};
     }
 
     char *GetBuf() const { return m_buf; }
@@ -108,10 +116,11 @@ public:
     }
 
     // UserData field, not used yet
-    std::any GetUserData() const { return m_user_data; }           // not used yet
-    void SetUserData(const std::any &data) { m_user_data = data; } // not used yet
+    const std::any &GetUserData() const { return m_user_data; }           // not used yet
+    void SetUserData(const std::any &data) { m_user_data = data; }        // not used yet
 
     std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
+    std::shared_ptr<CPFilePair> GetCPFPPtr() const { return mCPFPIt; }
     void SetCPFPPtr(std::shared_ptr<CPFilePair> it) { mCPFPIt = it; }
 
 private:
