@@ -1,8 +1,13 @@
 #include <filesystem>
 #include "lib/combined/combined.hpp"
 
-CPFilePair::CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size, bool direct_io, bool sync_writes)
-    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes)
+CPFilePair::CPFilePair(std::string_view src_path, 
+    std::string_view dst_path, 
+    size_t io_size, 
+    bool direct_io, 
+    bool sync_writes,
+    std::shared_ptr<ILogger> logger)
+    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes), m_logger(logger)
 {
     bzero(&m_src_stat, sizeof(struct stat));
     bzero(&m_dst_stat, sizeof(struct stat));

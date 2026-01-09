@@ -7,6 +7,8 @@
 #include <spdlog/sinks/stdout_color_sinks.h> // 需要包含此头文件以支持彩色控制台输出
 #include <spdlog/sinks/basic_file_sink.h>
 #include <fmt/format.h>
+#include <memory>
+#include "base/logger.hpp"
 
 #define SECTORSIZE 512
 #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
@@ -82,19 +84,16 @@ private:
     std::list<std::string> m_stack;
 };
 
-// Logger functions
-void InitGlobalConsoleLogger(spdlog::level::level_enum log_level);
-void InitGlobalFileLogger(const std::string &filePath, spdlog::level::level_enum log_level);
-std::shared_ptr<spdlog::logger> GetGlobalLogger();
+// // Logger functions
+// void InitGlobalConsoleLogger(spdlog::level::level_enum log_level);
+// void InitGlobalFileLogger(const std::string &filePath, spdlog::level::level_enum log_level);
+// std::shared_ptr<spdlog::logger> GetGlobalLogger();
 
 // 通用的，记录各个函数运行时间的类
 class FuncDurationStat
 {
 public:
-    FuncDurationStat()
-    {
-        m_logger = GetGlobalLogger();
-    };
+    FuncDurationStat(std::shared_ptr<ILogger> logger) : mLogger(logger) {}
     // duration in ms
     void AddDuration(std::string_view func_name, int64_t duration)
     {
@@ -110,7 +109,7 @@ public:
     void PrintStats()
     {
         std::lock_guard<std::mutex> lock(m_mutex);
-        m_logger->info("Function Duration Statistics:");
+        mLogger->info("Function Duration Statistics:");
         for (const auto &pair : m_stats)
         {
             const std::string &func_name = pair.first;
@@ -135,8 +134,8 @@ public:
                 }
             }
             double avg_duration = static_cast<double>(total) / durations.size();
-            m_logger->info("Function: {}, Count: {}, Avg: {:.2f} ms, Min: {} ms, Max: {} ms",
-                           func_name, durations.size(), avg_duration, min_duration, max_duration);
+            mLogger->info("Function: {}, Count: {}, Avg: {:.2f} ms, Min: {} ms, Max: {} ms",
+                          func_name, durations.size(), avg_duration, min_duration, max_duration);
         }
     }
 
@@ -144,5 +143,5 @@ private:
     // key: function name, value: list of durations (unit in user-defined, e.g., microseconds)
     std::unordered_map<std::string, std::list<int64_t>> m_stats;
     std::mutex m_mutex;
-    std::shared_ptr<spdlog::logger> m_logger;
+    std::shared_ptr<ILogger> mLogger;
 };

@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 class Inotify
 {
 public:
-    Inotify(const std::string &path)
+    Inotify(const std::string &path, std::shared_ptr<ILogger> logger):m_logger(logger)
     {
         mRootPath = path;
         mFD = inotify_init();
@@ -100,5 +100,5 @@ private:
     int mFD = -1;
     std::string mRootPath;
     int mMask = IN_CLOSE_WRITE | IN_CREATE;
-    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
+    std::shared_ptr<ILogger> m_logger;
 };

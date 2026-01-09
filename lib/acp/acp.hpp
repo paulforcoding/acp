@@ -18,8 +18,8 @@
 class AIOSlotMgr : public IOSlotMgr<IOSlot>
 {
 public:
-    AIOSlotMgr(const RWCombinedCopyOptions &options, CPFilePairMgr *file_pair_mgr)
-        : IOSlotMgr<IOSlot>(options, file_pair_mgr)
+    AIOSlotMgr(const RWCombinedCopyOptions &options, CPFilePairMgr *file_pair_mgr, std::shared_ptr<ILogger> logger)
+        : IOSlotMgr<IOSlot>(options, file_pair_mgr, logger)
     {
     }
     ~AIOSlotMgr() override

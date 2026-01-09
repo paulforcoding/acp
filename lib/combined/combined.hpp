@@ -4,6 +4,7 @@
 #include <cstddef> // size_t
 #include <libaio.h>
 #include <tl/expected.hpp>
+#include <memory>
 #include "base/base.hpp"
 #include "base/chan.hpp"
 
@@ -149,7 +150,12 @@ struct RWCombinedCopyOptions
 class CPFilePair
 {
 public:
-    CPFilePair(std::string_view src_path, std::string_view dst_path, size_t io_size, bool direct_io, bool sync_writes); // full path expected
+    CPFilePair(std::string_view src_path,
+               std::string_view dst_path,
+               size_t io_size,
+               bool direct_io,
+               bool sync_writes,
+               std::shared_ptr<ILogger> logger); // full path expected
     ~CPFilePair()
     {
         if (m_src_fd >= 0)
@@ -225,14 +231,16 @@ private:
 
     bool mIsDir = false;
 
-    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
+    std::shared_ptr<ILogger> m_logger;
 };
 
 class CPFilePairMgr
 {
 public:
     // make sure at lease we got one elem in mFilePairs
-    CPFilePairMgr(const RWCombinedCopyOptions &options) : m_options(options)
+    CPFilePairMgr(const RWCombinedCopyOptions &options,
+                  std::shared_ptr<ILogger> logger)
+        : m_options(options), m_logger(logger)
     {
         mReadPtr = mFilePairs.begin();
     }
@@ -240,7 +248,13 @@ public:
     tl::expected<void, StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        mFilePairs.push_back(std::make_shared<CPFilePair>(src_path, dst_path, m_options.IoSize, m_options.DirectIO, m_options.SyncWrites));
+        mFilePairs.push_back(
+            std::make_shared<CPFilePair>(src_path,
+                                         dst_path,
+                                         m_options.IoSize,
+                                         m_options.DirectIO,
+                                         m_options.SyncWrites,
+                                         m_logger));
         if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
         {
             mReadPtr = mFilePairs.begin();
@@ -293,7 +307,7 @@ private:
     std::atomic_bool mStartFlag = false; // whether file pairs have been filled
     std::atomic_bool mStopFlag = false;
 
-    std::shared_ptr<spdlog::logger> m_logger = GetGlobalLogger();
+    std::shared_ptr<ILogger> m_logger;
 };
 
 // abstract class for IOSlotMgr, use as interface
@@ -301,8 +315,10 @@ template <typename SlotType = IOSlot>
 class IOSlotMgr
 {
 public:
-    IOSlotMgr(const RWCombinedCopyOptions &options, CPFilePairMgr *file_pair_mgr)
-        : m_options(options), mCPFPMgr(file_pair_mgr), m_logger(GetGlobalLogger())
+    IOSlotMgr(const RWCombinedCopyOptions &options,
+              CPFilePairMgr *file_pair_mgr,
+              std::shared_ptr<ILogger> logger)
+        : m_options(options), mCPFPMgr(file_pair_mgr), m_logger(logger)
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
@@ -396,7 +412,7 @@ public:
 
         return {};
     }
-    void SetFuncDurationStat(FuncDurationStat *stat)
+    void SetFuncDurationStat(std::shared_ptr<FuncDurationStat> stat)
     {
         m_func_duration_stat = stat;
     }
@@ -584,6 +600,6 @@ protected:
     RWCombinedCopyOptions m_options;
     CPFilePairMgr *mCPFPMgr;
 
-    std::shared_ptr<spdlog::logger> m_logger;
-    FuncDurationStat *m_func_duration_stat;
+    std::shared_ptr<ILogger> m_logger;
+    std::shared_ptr<FuncDurationStat> m_func_duration_stat;
 };

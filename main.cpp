@@ -8,6 +8,7 @@
 #include "base/base.hpp"
 #include "base/chan.hpp"
 #include "base/inotify.hpp"
+#include "base/logger.hpp"
 
 std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
 {
@@ -38,20 +39,22 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     return options;
 }
 
-void InitGlobalLogger(const RWCombinedCopyOptions &options)
+std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
 {
-    if (options.LogMode == "console")
+    std::shared_ptr<ILogger> myLogger;
+    if (options.LogMode == "file")
     {
-        ::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
-    }
-    else if (options.LogMode == "file")
-    {
-        ::InitGlobalFileLogger(options.LogFilePath, spdlog::level::from_str(options.LogLevel));
+        auto logger = spdlog::basic_logger_mt("file", options.LogFilePath);
+        myLogger = std::make_shared<SpdLogger>(spdlog::get("file"));
+        myLogger->set_level(options.LogLevel);
+        return myLogger;
     }
     else
     {
-        // default to console
-        ::InitGlobalConsoleLogger(spdlog::level::from_str(options.LogLevel));
+        auto logger = spdlog::stdout_color_mt("console");
+        myLogger = std::make_shared<SpdLogger>(spdlog::get("console"));
+        myLogger->set_level(options.LogLevel);
+        return myLogger;
     }
 }
 
@@ -71,7 +74,7 @@ int main(int argc, char *argv[])
     }
     auto options = options_opt.value();
 
-    InitGlobalLogger(options);
+    auto logger = InitLogger(options);
 
     if (argc != 3)
     {
@@ -143,11 +146,9 @@ int main(int argc, char *argv[])
         }
     }
 
-    auto logger = ::GetGlobalLogger();
-
     // deal with inotify if enabled
     InotifyChannel iChan;
-    Inotify inotifyWatcher(src_p.string());
+    Inotify inotifyWatcher(src_p.string(), logger);
     std::jthread inotifyThread;
     if (options.EnableInotify && fs::is_directory(src_path) && fs::is_directory(dst_path))
     {
@@ -160,9 +161,8 @@ int main(int argc, char *argv[])
         }
         // start a thread to read inotify events and push to copyChannel
         inotifyThread = std::jthread(
-            [&inotifyWatcher, &iChan]()
+            [&inotifyWatcher, &iChan, logger]()
             {
-                auto logger = ::GetGlobalLogger();
                 while (true)
                 {
                     auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
@@ -175,19 +175,18 @@ int main(int argc, char *argv[])
             });
     }
 
+    // 开始创建各种对象，注入依赖
     Channel<CopyEntry> copyChannel(1024);
+    auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
+    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);
 
-    auto funcDurationStat = ::FuncDurationStat{};
-
-    CopyEngine file_copier(options);
     // start a thread to run CopyEngine
     std::thread file_copy_thread(
-        [&file_copier, &copyChannel, &funcDurationStat]()
+        [&file_copier, &copyChannel, logger]()
         { 
-    auto copy_res = file_copier.RunChannel(&funcDurationStat, copyChannel); 
+    auto copy_res = file_copier->RunChannel(copyChannel); 
     if (!copy_res)
-    {
-        auto logger = ::GetGlobalLogger();
+    {        
         // std::cerr << "File copy failed: " << copy_res.error().what() << std::endl;
         logger->error("File copy failed: {}", copy_res.error().what());        
     } });
@@ -282,6 +281,6 @@ int main(int argc, char *argv[])
 
     file_copy_thread.join();
 
-    funcDurationStat.PrintStats();
+    funcDurationStat->PrintStats();
     return 0;
 }
