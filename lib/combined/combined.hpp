@@ -7,6 +7,11 @@
 #include <memory>
 #include "base/base.hpp"
 #include "base/chan.hpp"
+#include <vector>
+#include <map>
+#include <chrono>
+#include <cassert>
+#include <string>
 
 struct CopyEntry
 {
@@ -335,26 +340,21 @@ public:
 
         mLogger->debug("IOSlotMgr created with QueueDepth: {}, IoSize: {}", slot_count, buf_size);
 
+        assert(file_pair_mgr != nullptr);
+
         for (size_t i = 0; i < slot_count; ++i)
         {
-            m_slots.push_back(new SlotType(buf_size, i));
+            m_slots.emplace_back(std::make_unique<SlotType>(buf_size, i));
         }
     }
-    virtual ~IOSlotMgr()
-    {
-        for (auto slot : m_slots)
-        {
-            delete slot;
-        }
-        m_slots.clear();
-    }
+    virtual ~IOSlotMgr() = default;
     SlotType *GetSlot(int id)
     {
         if (id < 0 || static_cast<size_t>(id) >= m_slots.size())
         {
             return nullptr;
         }
-        return m_slots[id];
+        return m_slots[id].get();
     }
 
     tl::expected<void, StackError> RunCopyQueue()
@@ -431,8 +431,9 @@ protected:
     {
         // 检查是否只少有一个slot处于ReadSubmitted或者WriteSubmitted状态
         bool isStuck = true;
-        for (auto slot : m_slots)
+        for (auto &slot_up : m_slots)
         {
+            auto slot = slot_up.get();
             if (slot->GetStatus() == IOSlot::Status::ReadSubmitted || slot->GetStatus() == IOSlot::Status::WriteSubmitted)
             {
                 isStuck = false;
@@ -454,8 +455,9 @@ protected:
         // TODO: change to batch submit later
         int submitted = 0;
 
-        for (auto slot : m_slots)
+        for (auto &slot_up : m_slots)
         {
+            auto slot = slot_up.get();
             // prepare read io
             if (slot->GetStatus() == IOSlot::Status::Init)
             {
@@ -517,8 +519,9 @@ protected:
         int submitted = 0;
 
         // 找出所有可以提交写请求的slot并提交写请求
-        for (auto slot : m_slots)
+        for (auto &slot_up : m_slots)
         {
+            auto slot = slot_up.get();
             // prepare write io
             if (slot->GetStatus() == IOSlot::Status::WritePrepared)
             {
@@ -548,8 +551,9 @@ protected:
         mLogger->warn("Current IOSlot statuses:");
         // 按状态统计slot数量，并打印每个状态slot的数量
         std::map<IOSlot::Status, int> status_count;
-        for (auto slot : m_slots)
+        for (auto &slot_up : m_slots)
         {
+            auto slot = slot_up.get();
             status_count[slot->GetStatus()]++;
         }
 
@@ -560,14 +564,17 @@ protected:
     }
     void Reset()
     {
-        for (auto slot : m_slots)
+        for (auto &slot_up : m_slots)
         {
-            slot->Reset();
+            if (slot_up)
+            {
+                slot_up->Reset();
+            }
         }
     }
 
-    void AddDuration(std::string_view func_name, std::chrono::_V2::system_clock::time_point start,
-                     std::chrono::_V2::system_clock::time_point end)
+    void AddDuration(std::string_view func_name, std::chrono::high_resolution_clock::time_point start,
+                     std::chrono::high_resolution_clock::time_point end)
     {
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
@@ -604,7 +611,7 @@ private:
     virtual tl::expected<void, StackError> IOReap() = 0;
 
 protected:
-    std::vector<SlotType *> m_slots;
+    std::vector<std::unique_ptr<SlotType>> m_slots;
 
     RWCombinedCopyOptions m_options;
     CPFilePairMgr *mCPFPMgr;
