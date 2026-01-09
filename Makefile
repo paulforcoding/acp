@@ -35,7 +35,8 @@ distclean: clean
 .PHONY: all clean distclean check-config
 
 # Test target (requires Catch2 available under lib/thirdparty)
-TEST_SRC := $(wildcard tests/*.cpp)
+TEST_SRC := $(wildcard tests/*.cpp) \
+			$(wildcard lib/thirdparty/catch2/catch_amalgamated.cpp)
 TEST_BIN := tests/test_all
 .PHONY: test
 test:
