@@ -8,6 +8,13 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <fmt/format.h>
 #include <memory>
+#include <vector>
+#include <string>
+#include <unordered_map>
+#include <mutex>
+#include <chrono>
+#include <cstring> // strerror
+#include <cerrno>
 #include "base/logger.hpp"
 
 #define SECTORSIZE 512

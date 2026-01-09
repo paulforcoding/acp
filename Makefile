@@ -34,9 +34,9 @@ distclean: clean
 
 .PHONY: all clean distclean check-config
 
-# Test target (requires Catch2 available on include path)
-TEST_SRC := tests/test_channel.cpp
-TEST_BIN := tests/test_channel
+# Test target (requires Catch2 available under lib/thirdparty)
+TEST_SRC := $(wildcard tests/*.cpp)
+TEST_BIN := tests/test_all
 .PHONY: test
 test:
-	$(CXX) $(CXXFLAGS) -I. -o $(TEST_BIN) $(TEST_SRC)
+	$(CXX) $(CXXFLAGS) -I. -o $(TEST_BIN) $(TEST_SRC) -pthread
