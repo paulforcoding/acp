@@ -47,7 +47,7 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
         if (ret == -EAGAIN)
         {
             mLogger->warn("io_uring_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
-            return tl::unexpected(StackError("EAGAIN"));
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
         return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }
@@ -91,7 +91,7 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneWrite(IOSlot *slot)
         if (ret == -EAGAIN)
         {
             mLogger->warn("io_uring_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
-            return tl::unexpected(StackError("EAGAIN"));
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
         return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }

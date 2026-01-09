@@ -32,56 +32,72 @@ void FreeBytes(T &p)
     p = nullptr;
 }
 
+// 此class是结合tl::expected使用的，用于串联函数调用栈各函数的返回值，not thread-safe
 class StackError
 {
 public:
-    StackError(std::string_view msg) { m_stack.push_back(std::string(msg)); }
-    StackError(std::string_view msg, const StackError &prev)
+    StackError(std::string_view msg, int code = 0) : m_code(code)
     {
-        m_stack = prev.m_stack;
-        m_stack.push_back(std::string(msg));
-    }
-    const char *what() const
-    {
-        static std::string full_msg;
-        for (auto it = m_stack.rbegin(); it != m_stack.rend(); ++it)
-        {
-            if (it == m_stack.rbegin())
-            {
-                full_msg += *it + "\n";
-            }
-            else
-            {
-                full_msg += "  caused by: " + *it + "\n";
-            }
-            // full_msg += *it + "\n";
-        }
-        return full_msg.c_str();
+        m_stack.emplace_back(std::string(msg));
     }
 
-    // 实现 == 运算符重载， 判断StackError是否相等
+    StackError(std::string_view msg, const StackError &prev, int code = 0)
+        : m_stack(prev.m_stack), m_code(code ? code : prev.m_code)
+    {
+        m_stack.emplace_back(std::string(msg));
+    }
+
+    // convenience
+    static StackError FromErrno(int errnum)
+    {
+        return StackError(fmt::format("{}: {}", strerror(errnum), errnum), errnum);
+    }
+
+    // return a new StackError with extra context
+    // example: err = err.WithContext("while processing file X"); return tl::unexpected(err);
+    StackError WithContext(std::string_view ctx) const
+    {
+        StackError copy = *this;
+        copy.m_stack.emplace_back(std::string(ctx));
+        copy.m_full_msg.clear();
+        return copy;
+    }
+
+    // append in-place (useful in some flows)
+    void AppendContext(std::string_view ctx)
+    {
+        m_stack.emplace_back(std::string(ctx));
+        m_full_msg.clear();
+    }
+
+    int Code() const noexcept { return m_code; }
+
+    const char *ToString() const noexcept
+    {
+        if (m_full_msg.empty())
+        {
+            // build from top -> bottom for readability
+            for (auto it = m_stack.rbegin(); it != m_stack.rend(); ++it)
+            {
+                if (it == m_stack.rbegin())
+                    m_full_msg += *it;
+                else
+                    m_full_msg += std::string("  caused by: ") + *it;
+                m_full_msg += '\n';
+            }
+        }
+        return m_full_msg.c_str();
+    }
+
     bool operator==(const StackError &other) const
     {
-        if (m_stack.size() != other.m_stack.size())
-        {
-            return false;
-        }
-        auto it1 = m_stack.begin();
-        auto it2 = other.m_stack.begin();
-        while (it1 != m_stack.end() && it2 != other.m_stack.end())
-        {
-            if (*it1 != *it2)
-            {
-                return false;
-            }
-            ++it1;
-            ++it2;
-        }
-        return true;
+        return m_code == other.m_code && m_stack == other.m_stack;
     }
 
 private:
-    std::list<std::string> m_stack;
+    std::vector<std::string> m_stack;
+    int m_code = 0;                 // lastest error code, 0 if not applicable
+    mutable std::string m_full_msg; // cached what() result
 };
 
 // // Logger functions

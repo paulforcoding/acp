@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
         auto add_watch_res = inotifyWatcher.Init();
         if (!add_watch_res)
         {
-            std::cerr << fmt::format("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().what());
+            std::cerr << fmt::format("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().ToString());
             return 1;
         }
         // start a thread to read inotify events and push to copyChannel
@@ -169,7 +169,7 @@ int main(int argc, char *argv[])
                     if (!read_res)
                     {
 
-                        logger->error("Inotify read event failed: {}", read_res.error().what());
+                        logger->error("Inotify read event failed: {}", read_res.error().ToString());
                     }
                 }
             });
@@ -187,8 +187,8 @@ int main(int argc, char *argv[])
     auto copy_res = file_copier->RunChannel(copyChannel); 
     if (!copy_res)
     {        
-        // std::cerr << "File copy failed: " << copy_res.error().what() << std::endl;
-        logger->error("File copy failed: {}", copy_res.error().what());        
+        // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
+        logger->error("File copy failed: {}", copy_res.error().ToString());        
     } });
 
     // recursively walk through source directory and prepare file pairs
@@ -233,7 +233,7 @@ int main(int argc, char *argv[])
                 auto pop_res = iChan.Pop();
                 if (!pop_res)
                 {
-                    logger->error("Inotify copyChannel pop failed: {}", pop_res.error().what());
+                    logger->error("Inotify copyChannel pop failed: {}", pop_res.error().ToString());
                     continue;
                 }
                 std::string changed_path = pop_res.value();

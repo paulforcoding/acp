@@ -85,7 +85,7 @@ private:
         auto run_res = slotMgr->RunCopyQueue();
         if (!run_res)
         {
-            mLogger->error("CopyEngine::RunChannel: RunCopyQueue() failed, err: {}", run_res.error().what());
+            mLogger->error("CopyEngine::RunChannel: RunCopyQueue() failed, err: {}", run_res.error().ToString());
         }
     };
 

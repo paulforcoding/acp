@@ -150,10 +150,10 @@ AGAIN:
         if (!init_res)
         {
             // 检查如果报错含有“not supported”字样，就简单跳过这次copy，取下一个mReadPtr即可
-            if (std::string(init_res.error().what()).find("not supported") != std::string::npos)
+            if (std::string(init_res.error().ToString()).find("not supported") != std::string::npos)
             {
                 mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
-                              (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().what());
+                              (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().ToString());
                 mFilePairs.erase(mReadPtr);
                 mReadPtr = mFilePairs.begin();
                 goto AGAIN;

@@ -496,7 +496,7 @@ protected:
                 if (!res)
                 {
                     // if EAGAIN, break and try again later
-                    if (res.error() == StackError("EAGAIN"))
+                    if (res.error().Code() == -EAGAIN)
                     {
                         mLogger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
                         PrtSlots();
@@ -530,7 +530,7 @@ protected:
                 if (!res)
                 {
                     // if EAGAIN, break and try again later
-                    if (res.error() == StackError("EAGAIN"))
+                    if (res.error().Code() == -EAGAIN)
                     {
                         mLogger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
                         PrtSlots();

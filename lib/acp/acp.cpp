@@ -78,7 +78,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
         {
             mLogger->warn("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
             // PrtSlots();
-            return tl::unexpected(StackError("EAGAIN"));
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
 
         return tl::unexpected(StackError(
@@ -140,7 +140,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
         if (ret == -EAGAIN)
         {
             mLogger->warn("io_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
-            return tl::unexpected(StackError("EAGAIN"));
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
 
         return tl::unexpected(StackError(
