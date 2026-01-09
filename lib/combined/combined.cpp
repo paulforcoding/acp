@@ -1,13 +1,13 @@
 #include <filesystem>
 #include "lib/combined/combined.hpp"
 
-CPFilePair::CPFilePair(std::string_view src_path, 
-    std::string_view dst_path, 
-    size_t io_size, 
-    bool direct_io, 
-    bool sync_writes,
-    std::shared_ptr<ILogger> logger)
-    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes), m_logger(logger)
+CPFilePair::CPFilePair(std::string_view src_path,
+                       std::string_view dst_path,
+                       size_t io_size,
+                       bool direct_io,
+                       bool sync_writes,
+                       std::shared_ptr<ILogger> logger)
+    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes), mLogger(logger)
 {
     bzero(&m_src_stat, sizeof(struct stat));
     bzero(&m_dst_stat, sizeof(struct stat));
@@ -33,8 +33,8 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                 fmt::format("Failed to create symlink at destination: {}, pointing to: {}, errstr: {}",
                             m_dst_path, target_path.string(), ec.message())));
         }
-        m_logger->debug("Source is a symlink, created destination symlink: {} -> {}",
-                        m_dst_path, target_path.string());
+        mLogger->debug("Source is a symlink, created destination symlink: {} -> {}",
+                       m_dst_path, target_path.string());
         return {};
     }
 
@@ -49,7 +49,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             return tl::unexpected(StackError(
                 fmt::format("Failed to create destination directory: {}, errstr: {}", m_dst_path, ec.message())));
         }
-        m_logger->debug("Source is a directory, created destination directory: {}", m_dst_path);
+        mLogger->debug("Source is a directory, created destination directory: {}", m_dst_path);
         return {};
     }
 
@@ -62,7 +62,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     }
 
     // check source file
-    m_logger->trace("Opening source file: {}", m_src_path);
+    mLogger->trace("Opening source file: {}", m_src_path);
     if (mDirectIO)
     {
         m_src_fd = open(m_src_path.c_str(), O_RDONLY | O_DIRECT);
@@ -100,7 +100,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
         }
     }
 
-    m_logger->trace("Opening/creating destination file: {}", m_dst_path);
+    mLogger->trace("Opening/creating destination file: {}", m_dst_path);
     // check destination file
     if (mDirectIO)
     {
@@ -117,7 +117,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
     }
 
-    m_logger->debug("Initialized file pair: src: {}, dst: {}, size: {}", m_src_path, m_dst_path, GetSrcFileSize());
+    mLogger->debug("Initialized file pair: src: {}, dst: {}, size: {}", m_src_path, m_dst_path, GetSrcFileSize());
     return {};
 }
 
@@ -139,7 +139,7 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
 AGAIN:
     if (mReadPtr == mFilePairs.end())
     {
-        m_logger->debug("GetNextReadIO() ended");
+        mLogger->debug("GetNextReadIO() ended");
         return nullptr; // already at end
     }
     // now mReadPtr points to a valid file pair
@@ -152,8 +152,8 @@ AGAIN:
             // 检查如果报错含有“not supported”字样，就简单跳过这次copy，取下一个mReadPtr即可
             if (std::string(init_res.error().what()).find("not supported") != std::string::npos)
             {
-                m_logger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
-                               (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().what());
+                mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
+                              (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().what());
                 mFilePairs.erase(mReadPtr);
                 mReadPtr = mFilePairs.begin();
                 goto AGAIN;
@@ -167,8 +167,8 @@ AGAIN:
     {
         namespace fs = std::filesystem;
         // make dirs at dest, return error if failed
-        m_logger->trace("mkdir for src: {}, dst: {}",
-                        (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
+        mLogger->trace("mkdir for src: {}, dst: {}",
+                       (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
 
         std::error_code ec;
         fs::create_directories((*mReadPtr)->GetDstPath(), ec);
@@ -195,8 +195,8 @@ AGAIN:
         // make sure to return a initialized and not-finished file pair,
         // and make sure 0-size files are get popped from mFilePairs to mInflightFPs
     }
-    m_logger->debug("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
-                    (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), (*mReadPtr)->GetReadOffset());
+    mLogger->debug("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
+                   (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), (*mReadPtr)->GetReadOffset());
     return *mReadPtr;
 }
 
@@ -214,22 +214,14 @@ void CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
 {
     mInflightFPs.Push(pFP, pFP->GetSrcPath());
 
-    m_logger->debug("Completed reading file pair: src: {}, dst: {}, size: {}, inflight pairs: {}",
-                    pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
-    // if (mInflightFPs.Size() > 18)
-    // {
-    //     for (const auto &fp : mInflightFPs.GetList())
-    //     {
-    //         m_logger->info("  Inflight src: {}, dst: {}", fp->GetSrcPath(), fp->GetDstPath());
-    //     }
-    //     assert(false);
-    // }
+    mLogger->debug("Completed reading file pair: src: {}, dst: {}, size: {}, inflight pairs: {}",
+                   pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
 
     // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
     if ((pFP)->IsInitialized() && (pFP)->GetSrcFileSize() == 0)
     {
-        m_logger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
-                        (pFP)->GetSrcPath(), (pFP)->GetDstPath());
+        mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
+                       (pFP)->GetSrcPath(), (pFP)->GetDstPath());
         CheckWriteComplete(pFP); // directly check write complete for 0-size files
     }
 
@@ -240,8 +232,8 @@ void CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
 tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr<CPFilePair> pFP)
 {
     assert(pFP != nullptr);
-    m_logger->debug("Checking write completion for file pair: src: {}, dst: {}",
-                    pFP->GetSrcPath(), pFP->GetDstPath());
+    mLogger->debug("Checking write completion for file pair: src: {}, dst: {}",
+                   pFP->GetSrcPath(), pFP->GetDstPath());
 
     if (pFP->IsWriteFinished())
     {
@@ -264,8 +256,8 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
         // 如果有其他结尾要做的事情，比如copy file attributes，可以在这里做
 
-        m_logger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
-                        pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
+        mLogger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
+                       pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
         // 从inflight列表中移除
         mInflightFPs.Remove(pFP, pFP->GetSrcPath());
     }

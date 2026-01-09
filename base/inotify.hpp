@@ -12,7 +12,7 @@ namespace fs = std::filesystem;
 class Inotify
 {
 public:
-    Inotify(const std::string &path, std::shared_ptr<ILogger> logger):m_logger(logger)
+    Inotify(const std::string &path, std::shared_ptr<ILogger> logger):mLogger(logger)
     {
         mRootPath = path;
         mFD = inotify_init();
@@ -72,11 +72,11 @@ public:
             struct inotify_event *event = (struct inotify_event *)&buffer[i];
             if (event->len > 0)
             {
-                m_logger->debug("Inotify event: wd: {}, mask: {}, cookie: {}, len: {}, name: {}",
+                mLogger->debug("Inotify event: wd: {}, mask: {}, cookie: {}, len: {}, name: {}",
                                 event->wd, event->mask, event->cookie, event->len, event->name);
                 std::string entry(event->name);
                 auto file_path = std::filesystem::canonical(fs::path(mRootPath) / entry);
-                m_logger->debug("Inotify detected file change: {}", file_path.string());
+                mLogger->debug("Inotify detected file change: {}", file_path.string());
 
                 // 如果是目录，要添加到AddWatch中
                 if ((event->mask & IN_ISDIR) && (event->mask & IN_CREATE))
@@ -85,10 +85,10 @@ public:
                     auto add_watch_res = AddWatch(file_path);
                     if (!add_watch_res)
                     {
-                        m_logger->error("AddWatch failed for new directory {}", file_path.string());
+                        mLogger->error("AddWatch failed for new directory {}", file_path.string());
                     }
                 }
-                m_logger->debug("Inotify push: {}", file_path.string());
+                mLogger->debug("Inotify push: {}", file_path.string());
                 channel.Push(file_path.string());
             }
             i += sizeof(struct inotify_event) + event->len;
@@ -100,5 +100,5 @@ private:
     int mFD = -1;
     std::string mRootPath;
     int mMask = IN_CLOSE_WRITE | IN_CREATE;
-    std::shared_ptr<ILogger> m_logger;
+    std::shared_ptr<ILogger> mLogger;
 };

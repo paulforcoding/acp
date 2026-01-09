@@ -160,13 +160,13 @@ public:
     {
         if (m_src_fd >= 0)
         {
-            m_logger->trace("Closing source file descriptor: {}, src: {}", m_src_fd, m_src_path);
+            mLogger->trace("Closing source file descriptor: {}, src: {}", m_src_fd, m_src_path);
             close(m_src_fd);
             m_src_fd = -1;
         }
         if (m_dst_fd >= 0)
         {
-            m_logger->trace("Closing destination file descriptor: {}, dst: {}", m_dst_fd, m_dst_path);
+            mLogger->trace("Closing destination file descriptor: {}, dst: {}", m_dst_fd, m_dst_path);
             close(m_dst_fd);
             m_dst_fd = -1;
         }
@@ -183,7 +183,7 @@ public:
     }
     tl::expected<void, StackError> FsyncDst()
     {
-        m_logger->trace("Fsyncing destination file: {}", m_dst_path);
+        mLogger->trace("Fsyncing destination file: {}", m_dst_path);
         if (fsync(m_dst_fd) < 0)
         {
             return tl::unexpected(StackError(
@@ -208,8 +208,8 @@ public:
     bool IsReadFinished() const { return mReadBytes >= GetSrcFileSize(); }
     bool IsWriteFinished() const
     {
-        m_logger->debug("Checking IsWriteFinished: written_bytes: {}, src_file_size: {}, src: {}",
-                        mWrittenBytes, GetSrcFileSize(), m_src_path);
+        mLogger->debug("Checking IsWriteFinished: written_bytes: {}, src_file_size: {}, src: {}",
+                       mWrittenBytes, GetSrcFileSize(), m_src_path);
         return mWrittenBytes >= GetSrcFileSize();
     }
     bool IsInitialized() const { return (m_src_fd >= 0 && m_dst_fd >= 0) || IsDir(); }
@@ -231,7 +231,7 @@ private:
 
     bool mIsDir = false;
 
-    std::shared_ptr<ILogger> m_logger;
+    std::shared_ptr<ILogger> mLogger;
 };
 
 class CPFilePairMgr
@@ -240,7 +240,7 @@ public:
     // make sure at lease we got one elem in mFilePairs
     CPFilePairMgr(const RWCombinedCopyOptions &options,
                   std::shared_ptr<ILogger> logger)
-        : m_options(options), m_logger(logger)
+        : m_options(options), mLogger(logger)
     {
         mReadPtr = mFilePairs.begin();
     }
@@ -254,7 +254,7 @@ public:
                                          m_options.IoSize,
                                          m_options.DirectIO,
                                          m_options.SyncWrites,
-                                         m_logger));
+                                         mLogger));
         if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
         {
             mReadPtr = mFilePairs.begin();
@@ -283,12 +283,12 @@ public:
         auto should = (mStopFlag.load() && mReadPtr == mFilePairs.end() && mStartFlag.load() && mFilePairs.empty() && mInflightFPs.Empty());
         if (!should)
         {
-            m_logger->debug("ShouldStopCopy() == false: StopFlag: {}, ReadPtr at end: {}, StartFlag: {}, FilePairs empty: {}, InflightFPs empty: {}",
-                            mStopFlag.load(),
-                            (mReadPtr == mFilePairs.end()) ? "true" : "false",
-                            mStartFlag.load(),
-                            mFilePairs.empty() ? "true" : "false",
-                            mInflightFPs.Empty() ? "true" : "false");
+            mLogger->debug("ShouldStopCopy() == false: StopFlag: {}, ReadPtr at end: {}, StartFlag: {}, FilePairs empty: {}, InflightFPs empty: {}",
+                           mStopFlag.load(),
+                           (mReadPtr == mFilePairs.end()) ? "true" : "false",
+                           mStartFlag.load(),
+                           mFilePairs.empty() ? "true" : "false",
+                           mInflightFPs.Empty() ? "true" : "false");
         }
         return should;
     }
@@ -307,7 +307,7 @@ private:
     std::atomic_bool mStartFlag = false; // whether file pairs have been filled
     std::atomic_bool mStopFlag = false;
 
-    std::shared_ptr<ILogger> m_logger;
+    std::shared_ptr<ILogger> mLogger;
 };
 
 // abstract class for IOSlotMgr, use as interface
@@ -318,13 +318,13 @@ public:
     IOSlotMgr(const RWCombinedCopyOptions &options,
               CPFilePairMgr *file_pair_mgr,
               std::shared_ptr<ILogger> logger)
-        : m_options(options), mCPFPMgr(file_pair_mgr), m_logger(logger)
+        : m_options(options), mCPFPMgr(file_pair_mgr), mLogger(logger)
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
         m_slots.reserve(slot_count);
 
-        m_logger->debug("IOSlotMgr created with QueueDepth: {}, IoSize: {}", slot_count, buf_size);
+        mLogger->debug("IOSlotMgr created with QueueDepth: {}, IoSize: {}", slot_count, buf_size);
 
         for (size_t i = 0; i < slot_count; ++i)
         {
@@ -355,7 +355,7 @@ public:
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             if (mCPFPMgr->ShouldStopCopy())
             {
-                m_logger->debug("Received stop signal before starting copy queue.");
+                mLogger->debug("Received stop signal before starting copy queue.");
                 return {};
             }
         }
@@ -384,7 +384,7 @@ public:
                 return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
             }
 
-            m_logger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
+            mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
 
             // auto check_stuck_res = CheckStuck();
             // if (!check_stuck_res)
@@ -403,7 +403,7 @@ public:
             {
                 return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
             }
-            m_logger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
+            mLogger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
 
             round++;
         }
@@ -433,7 +433,7 @@ protected:
 
         if (isStuck && !mCPFPMgr->ShouldStopCopy() && !m_options.EnableInotify)
         {
-            m_logger->warn("Detected stuck AIO operations.");
+            mLogger->warn("Detected stuck AIO operations.");
             return tl::unexpected(StackError("Detected stuck AIO operations."));
         }
 
@@ -470,7 +470,7 @@ protected:
 
                 if (nextIO == nullptr)
                 {
-                    m_logger->debug("SubmitReads(): All read IOs have been submitted.");
+                    mLogger->debug("SubmitReads(): All read IOs have been submitted.");
                     break; // all io submitted
                 }
 
@@ -487,7 +487,7 @@ protected:
                     // if EAGAIN, break and try again later
                     if (res.error() == StackError("EAGAIN"))
                     {
-                        m_logger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
+                        mLogger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
                         PrtSlots();
                         break;
                     }
@@ -520,7 +520,7 @@ protected:
                     // if EAGAIN, break and try again later
                     if (res.error() == StackError("EAGAIN"))
                     {
-                        m_logger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
+                        mLogger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
                         PrtSlots();
                         break;
                     }
@@ -536,7 +536,7 @@ protected:
     }
     void PrtSlots()
     {
-        m_logger->warn("Current IOSlot statuses:");
+        mLogger->warn("Current IOSlot statuses:");
         // 按状态统计slot数量，并打印每个状态slot的数量
         std::map<IOSlot::Status, int> status_count;
         for (auto slot : m_slots)
@@ -546,7 +546,7 @@ protected:
 
         for (const auto &pair : status_count)
         {
-            m_logger->warn("Slot Status: {}, Count: {}", IOSlot::StatusToStr(pair.first), pair.second);
+            mLogger->warn("Slot Status: {}, Count: {}", IOSlot::StatusToStr(pair.first), pair.second);
         }
     }
     void Reset()
@@ -564,7 +564,7 @@ protected:
 
         if (duration > 100)
         {
-            m_logger->warn("Function {} took too long: {} ms", func_name, duration);
+            mLogger->warn("Function {} took too long: {} ms", func_name, duration);
         }
 
         if (m_func_duration_stat)
@@ -600,6 +600,6 @@ protected:
     RWCombinedCopyOptions m_options;
     CPFilePairMgr *mCPFPMgr;
 
-    std::shared_ptr<ILogger> m_logger;
+    std::shared_ptr<ILogger> mLogger;
     std::shared_ptr<FuncDurationStat> m_func_duration_stat;
 };

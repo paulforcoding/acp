@@ -17,8 +17,8 @@ void UIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFi
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe(&m_ring);
     size_t io_size = m_options.IoSize;
-    m_logger->debug("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), offset, io_size, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->debug("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                   slot->GetID(), offset, io_size, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
     io_uring_prep_read(sqe, currCPFPIt->GetSrcFd(), slot->GetBuf(), io_size, offset);
     io_uring_sqe_set_data(sqe, slot);
@@ -46,7 +46,7 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
     {
         if (ret == -EAGAIN)
         {
-            m_logger->warn("io_uring_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_uring_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
             return tl::unexpected(StackError("EAGAIN"));
         }
         return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
@@ -66,8 +66,8 @@ void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
         ioSize = m_options.IoSize;
     }
     io_uring_prep_write(sqe, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize, offset);
-    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                   slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
     io_uring_sqe_set_data(sqe, slot);
 
@@ -90,7 +90,7 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneWrite(IOSlot *slot)
     {
         if (ret == -EAGAIN)
         {
-            m_logger->warn("io_uring_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_uring_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
             return tl::unexpected(StackError("EAGAIN"));
         }
         return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
@@ -105,8 +105,8 @@ tl::expected<void, StackError> UIOSlotMgr::ReapRead(IOSlot *slot, io_uring_cqe *
     ssize_t res = cqe->res;
     auto [offset, ioSize] = slot->GetIOInfo();
 
-    m_logger->trace("UIO read completed for slot ID: {}, offset: {}, bytes read: {}",
-                    slot->GetID(), offset, res);
+    mLogger->trace("UIO read completed for slot ID: {}, offset: {}, bytes read: {}",
+                   slot->GetID(), offset, res);
     // assert(ioSize == static_cast<size_t>(res));
     assert(slot->GetStatus() == IOSlot::Status::ReadSubmitted);
 
@@ -116,7 +116,7 @@ tl::expected<void, StackError> UIOSlotMgr::ReapRead(IOSlot *slot, io_uring_cqe *
     {
         if (res == -EAGAIN)
         {
-            m_logger->warn("UIO read got EAGAIN, resubmitting for slot ID: {}, res: {}", slot->GetID(), res);
+            mLogger->warn("UIO read got EAGAIN, resubmitting for slot ID: {}, res: {}", slot->GetID(), res);
             // re-prepare read for this slot
             PrepareOneRead(slot, /*offset*/ 0, slot->GetCPFPPtr());
             return {};
@@ -129,7 +129,7 @@ tl::expected<void, StackError> UIOSlotMgr::ReapRead(IOSlot *slot, io_uring_cqe *
         return tl::unexpected(StackError("UIO read returned 0 bytes read, unexpected."));
     }
 
-    m_logger->debug("UIO read completed for slot ID: {}, bytes read: {}", slot->GetID(), res);
+    mLogger->debug("UIO read completed for slot ID: {}, bytes read: {}", slot->GetID(), res);
     // prepare write with same offset
     // extract offset from cqe not available; use slot's IOInfo
     slot->SetIOInfo(offset, static_cast<size_t>(res));
@@ -148,7 +148,7 @@ tl::expected<void, StackError> UIOSlotMgr::ReapWrite(IOSlot *slot, io_uring_cqe 
     {
         if (res == -EAGAIN)
         {
-            m_logger->warn("UIO write got EAGAIN, resubmitting for slot ID: {}, res: {}", slot->GetID(), res);
+            mLogger->warn("UIO write got EAGAIN, resubmitting for slot ID: {}, res: {}", slot->GetID(), res);
             PrepareOneWrite(slot);
             return {};
         }
@@ -163,8 +163,8 @@ tl::expected<void, StackError> UIOSlotMgr::ReapWrite(IOSlot *slot, io_uring_cqe 
     }
 
     auto currCPFPIt = slot->GetCPFPPtr();
-    m_logger->debug("UIO write completed for slot ID: {}, bytes written: {}, src: {}, dst: {}",
-                    slot->GetID(), res, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->debug("UIO write completed for slot ID: {}, bytes written: {}, src: {}, dst: {}",
+                   slot->GetID(), res, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
     currCPFPIt->UpdateWrittenBytes(res);
 
     auto check_res = CheckOneCompleted(slot);
@@ -182,12 +182,12 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
 
     for (int i = 0; i < max_events; ++i)
     {
-        m_logger->trace("Waiting for completion events to reap...");
+        mLogger->trace("Waiting for completion events to reap...");
         struct io_uring_cqe *cqe = nullptr;
         int ret = io_uring_peek_cqe(&m_ring, &cqe);
         if (ret == -EAGAIN || cqe == nullptr)
         {
-            m_logger->trace("No more completion events to reap.");
+            mLogger->trace("No more completion events to reap.");
             break; // no more events
         }
         if (ret < 0)
@@ -198,7 +198,7 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
         IOSlot *slot = static_cast<IOSlot *>(io_uring_cqe_get_data(cqe));
         if (slot->GetStatus() == IOSlot::Status::ReadSubmitted)
         {
-            m_logger->trace("Reaping read completion for slot ID: {}", slot->GetID());
+            mLogger->trace("Reaping read completion for slot ID: {}", slot->GetID());
             auto reap_res = ReapRead(slot, cqe);
             if (!reap_res)
             {
@@ -208,7 +208,7 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
         }
         else if (slot->GetStatus() == IOSlot::Status::WriteSubmitted)
         {
-            m_logger->trace("Reaping write for slot ID: {}", slot->GetID());
+            mLogger->trace("Reaping write for slot ID: {}", slot->GetID());
             auto reap_res = ReapWrite(slot, cqe);
             if (!reap_res)
             {

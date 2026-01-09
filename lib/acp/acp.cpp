@@ -23,9 +23,9 @@ void AIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFi
     auto iocb{slot->InitReadIOCB()};
     size_t io_size = m_options.IoSize;
 
-    m_logger->trace("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, iocb addr: {:p}, src: {}, dst: {}",
-                    slot->GetID(), offset, io_size, static_cast<void *>(iocb),
-                    currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->trace("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, iocb addr: {:p}, src: {}, dst: {}",
+                   slot->GetID(), offset, io_size, static_cast<void *>(iocb),
+                   currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
     io_prep_pread(iocb, currCPFPIt->GetSrcFd(), slot->GetBuf(), io_size, offset);
     iocb->data = slot; // associate slot with this iocb
     // iocb->aio_rw_flags |= RWF_NOWAIT;
@@ -76,7 +76,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
     {
         if (ret == -EAGAIN) // cannot submit more IO now
         {
-            m_logger->warn("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
             // PrtSlots();
             return tl::unexpected(StackError("EAGAIN"));
         }
@@ -103,8 +103,8 @@ void AIOSlotMgr::PrepareOneWrite(IOSlot *slot)
     }
     io_prep_pwrite(iocb, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize,
                    offset);
-    m_logger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                   slot->GetID(), offset, ioSize, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
     iocb->data = slot;
     // iocb->aio_rw_flags |= RWF_NOWAIT;
@@ -121,9 +121,9 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
     struct iocb *iocbs[1];
     iocbs[0] = iocb;
 
-    m_logger->debug("Submitting write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                    slot->GetID(), iocb->u.c.offset, iocb->u.c.nbytes,
-                    slot->GetCPFPPtr()->GetSrcPath(), slot->GetCPFPPtr()->GetDstPath());
+    mLogger->debug("Submitting write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
+                   slot->GetID(), iocb->u.c.offset, iocb->u.c.nbytes,
+                   slot->GetCPFPPtr()->GetSrcPath(), slot->GetCPFPPtr()->GetDstPath());
 
 #ifndef NDEBUG
     // 打印io_submit()所用时间
@@ -139,7 +139,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
         // EAGAIN happens here
         if (ret == -EAGAIN)
         {
-            m_logger->warn("io_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
             return tl::unexpected(StackError("EAGAIN"));
         }
 
@@ -170,8 +170,8 @@ tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
         // if we set RWF_NOWAIT, we'll got EAGAIN here, submit this read again
         if (io_ret == -EAGAIN)
         {
-            m_logger->warn("AIO read got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
-                           slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
+            mLogger->warn("AIO read got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
+                          slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
             PrtSlots();
             PrepareOneRead(slot, cb->u.c.offset, slot->GetCPFPPtr());
             return {}; // let SubmitReads handle resubmission in next round
@@ -185,8 +185,8 @@ tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
         return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
     }
 
-    m_logger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
-                    slot->GetID(), cb->u.c.offset, io_ret, static_cast<void *>(cb));
+    mLogger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
+                   slot->GetID(), cb->u.c.offset, io_ret, static_cast<void *>(cb));
 
     // prepare write io
     off_t write_offset = cb->u.c.offset; // same offset as read
@@ -213,8 +213,8 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
         //  if we set RWF_NOWAIT, we'll got EAGAIN here, submit this write again
         if (io_ret == -EAGAIN)
         {
-            m_logger->warn("AIO write got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
-                           slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
+            mLogger->warn("AIO write got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
+                          slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
             PrtSlots();
             PrepareOneWrite(slot);
             return {}; // let SubmitWrites handle resubmission in next round, this will let read IO go first
@@ -228,8 +228,8 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
         return tl::unexpected(StackError("AIO write returned 0 bytes written, unexpected."));
     }
 
-    m_logger->debug("AIO write completed for slot ID: {}, offset: {}, bytes written: {}, src: {}, dst: {}",
-                    slot->GetID(), cb->u.c.offset, io_ret, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
+    mLogger->debug("AIO write completed for slot ID: {}, offset: {}, bytes written: {}, src: {}, dst: {}",
+                   slot->GetID(), cb->u.c.offset, io_ret, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
 
     currCPFPIt->UpdateWrittenBytes(io_ret);
 
@@ -264,7 +264,7 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     {
         return tl::unexpected(StackError("io_getevents() failed, errno: " + std::to_string(-ret)));
     }
-    m_logger->debug("Reaped {} IO events.", ret);
+    mLogger->debug("Reaped {} IO events.", ret);
     if (ret == 0)
     {
         return {}; // no events to reap, just wait for next round
