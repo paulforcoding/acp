@@ -34,10 +34,20 @@ distclean: clean
 
 .PHONY: all clean distclean check-config
 
-# Test target (requires Catch2 available under lib/thirdparty)
-TEST_SRC := $(wildcard tests/*.cpp) \
-			$(wildcard lib/thirdparty/catch2/catch_amalgamated.cpp)
+# Test target (requires Catch2 amalgamated available under lib/thirdparty/catch2)
+TEST_SRC := $(wildcard tests/*.cpp)
+CATCH_SRC := lib/thirdparty/catch2/catch_amalgamated.cpp
+TEST_OBJS := $(patsubst %.cpp,%.o,$(TEST_SRC))
+CATCH_OBJ := $(patsubst %.cpp,%.o,$(CATCH_SRC))
 TEST_BIN := tests/test_all
 .PHONY: test
-test:
-	$(CXX) $(CXXFLAGS) -I. -o $(TEST_BIN) $(TEST_SRC) -pthread
+test: $(TEST_BIN)
+
+$(TEST_BIN): $(TEST_OBJS) $(CATCH_OBJ)
+	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -o $(TEST_BIN) $(TEST_OBJS) $(CATCH_OBJ) -pthread
+
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -c $< -o $@
+
+$(CATCH_OBJ): $(CATCH_SRC)
+	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -c $< -o $@
