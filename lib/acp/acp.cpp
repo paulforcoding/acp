@@ -8,7 +8,7 @@ tl::expected<void, StackError> AIOSlotMgr::Init()
 {
 
     io_context_t ctx = 0;
-    int ret = io_setup(static_cast<unsigned>(m_slots.size()), &ctx);
+    int ret = io_setup(static_cast<unsigned>(mRWSlots.size()), &ctx);
     if (ret < 0)
     {
         return tl::unexpected(StackError("io_setup() failed, errno: " + std::to_string(-ret)));
@@ -30,6 +30,7 @@ void AIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFi
     iocb->data = slot; // associate slot with this iocb
     // iocb->aio_rw_flags |= RWF_NOWAIT;
     slot->SetCPFPPtr(currCPFPIt);
+    slot->SetIOInfo(offset, io_size);
     slot->SetStatus(IOSlot::Status::ReadPrepared);
     currCPFPIt->UpdateReadBytes(io_size);
     mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
@@ -44,24 +45,6 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
 
     struct iocb *iocbs[1];
     iocbs[0] = iocb;
-
-    // special handling for zero-size source file
-    // auto currCPFPIt = slot->GetCPFPPtr();
-    // if (currCPFPIt->GetSrcFileSize() == 0)
-    // {
-    //     m_logger->warn("Source file size is 0, skipping read submission for slot ID: {}", slot->GetID());
-    //     slot->SetStatus(IOSlot::Status::WriteReaped); // directly mark as write reaped
-
-    //     auto check_res = CheckOneCompleted(slot);
-    //     if (!check_res)
-    //     {
-    //         return tl::unexpected(StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
-    //     }
-
-    //     // 不能在这里直接 CheckOneCompleted，因为此时currCPFPIt还没有被加入到inflight列表中
-    //     // 要等到下一次调用GetNextReadIO时，才能保证currCPFPIt已经在inflight列表中
-    //     return {};
-    // }
 
 #ifndef NDEBUG
     // 打印io_submit()所用时间
@@ -159,41 +142,10 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
 tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
 {
 
-    ssize_t io_ret = ev->res;
-    struct iocb *cb = ev->obj;
+    ssize_t io_ret = ev->res;    
     IOSlot *slot = static_cast<IOSlot *>(ev->data);
     assert(slot->GetStatus() == IOSlot::Status::ReadSubmitted);
-    slot->SetStatus(IOSlot::Status::ReadReaped);
-
-    if (io_ret < 0)
-    {
-        // if we set RWF_NOWAIT, we'll got EAGAIN here, submit this read again
-        if (io_ret == -EAGAIN)
-        {
-            mLogger->warn("AIO read got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
-                          slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
-            PrtSlots();
-            PrepareOneRead(slot, cb->u.c.offset, slot->GetCPFPPtr());
-            return {}; // let SubmitReads handle resubmission in next round
-        }
-
-        return tl::unexpected(StackError("AIO read failed, errno: " + std::to_string(-io_ret)));
-    }
-
-    if (io_ret == 0)
-    {
-        return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
-    }
-
-    mLogger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, iocb addr: {:p}",
-                   slot->GetID(), cb->u.c.offset, io_ret, static_cast<void *>(cb));
-
-    // prepare write io
-    off_t write_offset = cb->u.c.offset; // same offset as read
-    slot->SetIOInfo(write_offset, static_cast<size_t>(io_ret));
-    PrepareOneWrite(slot);
-
-    return {};
+    return HandleReadCompletion(slot, io_ret);
 }
 
 tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
@@ -201,50 +153,14 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
 
     ssize_t io_ret = ev->res;
     IOSlot *slot = static_cast<IOSlot *>(ev->data);
-    struct iocb *cb = ev->obj;
-    auto currCPFPIt = slot->GetCPFPPtr();
-
     assert(slot->GetStatus() == IOSlot::Status::WriteSubmitted);
 
-    slot->SetStatus(IOSlot::Status::WriteReaped);
-
-    if (io_ret < 0)
-    {
-        //  if we set RWF_NOWAIT, we'll got EAGAIN here, submit this write again
-        if (io_ret == -EAGAIN)
-        {
-            mLogger->warn("AIO write got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
-                          slot->GetID(), cb->u.c.offset, cb->u.c.nbytes);
-            PrtSlots();
-            PrepareOneWrite(slot);
-            return {}; // let SubmitWrites handle resubmission in next round, this will let read IO go first
-        }
-        return tl::unexpected(StackError(
-            fmt::format("AIO write failed, errno: {}, errstr: {}, offset: {}, io_size: {}",
-                        io_ret, strerror(-io_ret), cb->u.c.offset, cb->u.c.nbytes)));
-    }
-    if (io_ret == 0)
-    {
-        return tl::unexpected(StackError("AIO write returned 0 bytes written, unexpected."));
-    }
-
-    mLogger->debug("AIO write completed for slot ID: {}, offset: {}, bytes written: {}, src: {}, dst: {}",
-                   slot->GetID(), cb->u.c.offset, io_ret, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
-
-    currCPFPIt->UpdateWrittenBytes(io_ret);
-
-    auto check_res = CheckOneCompleted(slot);
-    if (!check_res)
-    {
-        return tl::unexpected(StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
-    }
-
-    return {};
+    return HandleWriteCompletion(slot, io_ret);
 }
 
 tl::expected<void, StackError> AIOSlotMgr::IOReap()
 {
-    const int max_events = static_cast<int>(m_slots.size());
+    const int max_events = static_cast<int>(mRWSlots.size());
     struct io_event events[max_events];
     struct timespec timeout;
     timeout.tv_sec = 10;
@@ -276,6 +192,7 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
         IOSlot *slot = static_cast<IOSlot *>(event.data);
         if (slot->GetStatus() == IOSlot::Status::ReadSubmitted)
         {
+
             auto reap_read_res = ReapRead(&event);
             if (!reap_read_res)
             {
@@ -295,16 +212,3 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     return {};
 }
 
-// tl::expected<void, StackError> AIOSlotMgr::CheckOneCompleted(AIOSlot *slot)
-// {
-//     if (slot->GetStatus() == IOSlot::Status::WriteReaped)
-//     {
-//         auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
-//         if (!check_res)
-//         {
-//             return tl::unexpected(StackError("mCPFPMgr->CheckWriteComplete(), err: ", check_res.error()));
-//         }
-//         slot->SetStatus(IOSlot::Status::Init);
-//     }
-//     return {};
-// }

@@ -25,122 +25,7 @@ struct CopyEntry
     }
 };
 
-class CPFilePair;
-
-class IOSlot
-{
-public:
-    enum class Status
-    {
-        Init,
-        ReadPrepared,
-        ReadSubmitted,
-        ReadReaped,
-        WritePrepared,
-        WriteSubmitted,
-        WriteReaped
-    };
-    static const char *StatusToStr(Status s)
-    {
-        switch (s)
-        {
-        case Status::Init:
-            return "Init";
-        case Status::ReadPrepared:
-            return "ReadPrepared";
-        case Status::ReadSubmitted:
-            return "ReadSubmitted";
-        case Status::ReadReaped:
-            return "ReadReaped";
-        case Status::WritePrepared:
-            return "WritePrepared";
-        case Status::WriteSubmitted:
-            return "WriteSubmitted";
-        case Status::WriteReaped:
-            return "WriteReaped";
-        }
-        return "UnknownStatus";
-    }
-    // ctor
-    IOSlot(size_t buf_size, int id)
-        : m_buf{AllocBytes(SECTORSIZE, buf_size)}, m_status{Status::Init}, m_id{id}
-    {
-    }
-    // dtor
-    virtual ~IOSlot() { FreeBytes(m_buf); }
-
-    // disable copy and move to avoid accidental double-free or ownership transfer
-    IOSlot(const IOSlot &) = delete;
-    IOSlot &operator=(const IOSlot &) = delete;
-    IOSlot(IOSlot &&) = delete;
-    IOSlot &operator=(IOSlot &&) = delete;
-
-    virtual void Reset()
-    {
-        m_status = Status::Init;
-        // bzero(m_buf, SECTORSIZE);
-        m_user_data = {};
-        // clear IO tracking
-        mIOInfo = IOInfo{};
-    }
-
-    char *GetBuf() const { return m_buf; }
-    Status GetStatus() const { return m_status; }
-    int GetID() const { return m_id; }
-    void SetStatus(Status s) { m_status = s; }
-
-    // IOInfo fields, used by ucp, in future may be used by acp
-    struct IOInfo
-    {
-        off_t offset = 0;
-        size_t io_size = 0;
-    };
-    void SetIOInfo(off_t offset, size_t io_size)
-    {
-        mIOInfo.offset = offset;
-        mIOInfo.io_size = io_size;
-    }
-    IOInfo GetIOInfo() const
-    {
-        return mIOInfo;
-    }
-
-    // getters for iocb, used by acp
-    struct iocb *GetReadIOCB() { return &m_iocb_read; }
-    struct iocb *GetWriteIOCB() { return &m_iocb_write; }
-
-    struct iocb *InitReadIOCB()
-    {
-        bzero(&m_iocb_read, sizeof(struct iocb));
-        return &m_iocb_read;
-    }
-    struct iocb *InitWriteIOCB()
-    {
-        bzero(&m_iocb_write, sizeof(struct iocb));
-        return &m_iocb_write;
-    }
-
-    // UserData field, not used yet
-    const std::any &GetUserData() const { return m_user_data; }           // not used yet
-    void SetUserData(const std::any &data) { m_user_data = data; }        // not used yet
-
-    std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
-    std::shared_ptr<CPFilePair> GetCPFPPtr() const { return mCPFPIt; }
-    void SetCPFPPtr(std::shared_ptr<CPFilePair> it) { mCPFPIt = it; }
-
-private:
-    // data fields
-    char *m_buf = nullptr;
-    Status m_status = Status::Init;
-    int m_id = -1;        // its id, also index in IOSlotMgr's m_slots
-    std::any m_user_data; // user data field
-    std::shared_ptr<CPFilePair> mCPFPIt;
-
-    IOInfo mIOInfo;
-
-    struct iocb m_iocb_read;  // 读iocb
-    struct iocb m_iocb_write; // 写iocb
-};
+// class CPFilePair;
 
 struct RWCombinedCopyOptions
 {
@@ -148,6 +33,7 @@ struct RWCombinedCopyOptions
     std::string LogMode;
     std::string LogFilePath;
     std::string CopyEngine;
+    std::string CopyMode; // "CksumCopy", "CopyOnly", "CksumOnly"
     int CopyParallelism;
     bool EnableInotify;
     bool PreserveSparseFiles;
@@ -324,6 +210,131 @@ private:
     std::shared_ptr<ILogger> mLogger;
 };
 
+class IOSlot
+{
+public:
+    enum class Status
+    {
+        Init,
+        ReadPrepared,
+        ReadSubmitted,
+        ReadReaped,
+        CksumReadPrepared,
+        CksumReadSubmitted,
+        CksumReadReaped,
+        WritePrepared,
+        WriteSubmitted,
+        WriteReaped
+    };
+    static const char *StatusToStr(Status s)
+    {
+        switch (s)
+        {
+        case Status::Init:
+            return "Init";
+        case Status::ReadPrepared:
+            return "ReadPrepared";
+        case Status::ReadSubmitted:
+            return "ReadSubmitted";
+        case Status::ReadReaped:
+            return "ReadReaped";
+        case Status::CksumReadPrepared:
+            return "CksumReadPrepared";
+        case Status::CksumReadSubmitted:
+            return "CksumReadSubmitted";
+        case Status::CksumReadReaped:
+            return "CksumReadReaped";
+        case Status::WritePrepared:
+            return "WritePrepared";
+        case Status::WriteSubmitted:
+            return "WriteSubmitted";
+        case Status::WriteReaped:
+            return "WriteReaped";
+        }
+        return "UnknownStatus";
+    }
+    // ctor
+    IOSlot(size_t buf_size, int id)
+        : m_buf{AllocBytes(SECTORSIZE, buf_size)}, m_status{Status::Init}, m_id{id}
+    {
+    }
+    // dtor
+    virtual ~IOSlot() { FreeBytes(m_buf); }
+
+    // disable copy and move to avoid accidental double-free or ownership transfer
+    IOSlot(const IOSlot &) = delete;
+    IOSlot &operator=(const IOSlot &) = delete;
+    IOSlot(IOSlot &&) = delete;
+    IOSlot &operator=(IOSlot &&) = delete;
+
+    virtual void Reset()
+    {
+        m_status = Status::Init;
+        // bzero(m_buf, SECTORSIZE);
+        m_user_data = {};
+        // clear IO tracking
+        mIOInfo = IOInfo{};
+    }
+
+    char *GetBuf() const { return m_buf; }
+    Status GetStatus() const { return m_status; }
+    int GetID() const { return m_id; }
+    void SetStatus(Status s) { m_status = s; }
+
+    // IOInfo fields, used by ucp, in future may be used by acp
+    struct IOInfo
+    {
+        off_t offset = 0;
+        size_t io_size = 0;
+    };
+    // IOInfo，先是被读使用，之后被写使用
+    void SetIOInfo(off_t offset, size_t io_size)
+    {
+        mIOInfo.offset = offset;
+        mIOInfo.io_size = io_size;
+    }
+    IOInfo GetIOInfo() const
+    {
+        return mIOInfo;
+    }
+
+    // getters for iocb, used by acp
+    struct iocb *GetReadIOCB() { return &m_iocb_read; }
+    struct iocb *GetWriteIOCB() { return &m_iocb_write; }
+
+    struct iocb *InitReadIOCB()
+    {
+        bzero(&m_iocb_read, sizeof(struct iocb));
+        return &m_iocb_read;
+    }
+    struct iocb *InitWriteIOCB()
+    {
+        bzero(&m_iocb_write, sizeof(struct iocb));
+        return &m_iocb_write;
+    }
+
+    // UserData field, not used yet
+    const std::any &GetUserData() const { return m_user_data; }    // not used yet
+    void SetUserData(const std::any &data) { m_user_data = data; } // not used yet
+
+    std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
+    std::shared_ptr<CPFilePair> GetCPFPPtr() const { return mCPFPIt; }
+    void SetCPFPPtr(std::shared_ptr<CPFilePair> it) { mCPFPIt = it; }
+
+private:
+    // data fields
+    char *m_buf = nullptr;
+    Status m_status = Status::Init;
+    int m_id = -1;        // its id, also index in IOSlotMgr's m_slots
+    std::any m_user_data; // user data field
+    std::shared_ptr<CPFilePair> mCPFPIt;
+
+    IOInfo mIOInfo;
+
+    struct iocb m_iocb_read;  // 读iocb
+    struct iocb m_iocb_write; // 写iocb
+};
+
 // abstract class for IOSlotMgr, use as interface
 template <typename SlotType = IOSlot>
 class IOSlotMgr
@@ -336,7 +347,7 @@ public:
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
-        m_slots.reserve(slot_count);
+        mRWSlots.reserve(slot_count);
 
         mLogger->debug("IOSlotMgr created with QueueDepth: {}, IoSize: {}", slot_count, buf_size);
 
@@ -344,17 +355,25 @@ public:
 
         for (size_t i = 0; i < slot_count; ++i)
         {
-            m_slots.emplace_back(std::make_unique<SlotType>(buf_size, i));
+            mRWSlots.emplace_back(std::make_unique<SlotType>(buf_size, i));
+        }
+        if (options.CopyMode == "CksumCopy" || options.CopyMode == "CksumOnly")
+        {
+            mCksumSlots.reserve(slot_count);
+            for (size_t i = 0; i < slot_count; ++i)
+            {
+                mCksumSlots.emplace_back(std::make_unique<SlotType>(buf_size, i));
+            }
         }
     }
     virtual ~IOSlotMgr() = default;
     SlotType *GetSlot(int id)
     {
-        if (id < 0 || static_cast<size_t>(id) >= m_slots.size())
+        if (id < 0 || static_cast<size_t>(id) >= mRWSlots.size())
         {
             return nullptr;
         }
-        return m_slots[id].get();
+        return mRWSlots[id].get();
     }
 
     tl::expected<void, StackError> RunCopyQueue()
@@ -421,6 +440,66 @@ public:
 
         return {};
     }
+
+    tl::expected<void, StackError> RunCksumQueue()
+    {
+        while (!mCPFPMgr->ShouldStartCopy())
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            if (mCPFPMgr->ShouldStopCopy())
+            {
+                mLogger->debug("Received stop signal before starting copy queue.");
+                return {};
+            }
+        }
+
+        auto init_res = Init();
+        if (!init_res)
+        {
+            return tl::unexpected(init_res.error());
+        }
+
+        long round = 0;
+        while (!mCPFPMgr->ShouldStopCopy())
+        {
+
+#ifndef NDEBUG
+            auto start = std::chrono::high_resolution_clock::now();
+            auto submit_res = SubmitReads();
+            auto end = std::chrono::high_resolution_clock::now();
+            AddDuration("SubmitReads()", start, end);
+#else
+            auto submit_res = SubmitReads();
+#endif
+
+            if (!submit_res)
+            {
+                return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
+            }
+
+            mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
+
+            auto reap_res = IOReap();
+            if (!reap_res)
+            {
+                return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
+            }
+
+            auto write_res = SubmitWrites();
+            if (!write_res)
+            {
+                return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
+            }
+            mLogger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
+
+            round++;
+        }
+
+        Reset();
+
+        return {};
+    }
+
     void SetFuncDurationStat(std::shared_ptr<FuncDurationStat> stat)
     {
         m_func_duration_stat = stat;
@@ -431,7 +510,7 @@ protected:
     {
         // 检查是否只少有一个slot处于ReadSubmitted或者WriteSubmitted状态
         bool isStuck = true;
-        for (auto &slot_up : m_slots)
+        for (auto &slot_up : mRWSlots)
         {
             auto slot = slot_up.get();
             if (slot->GetStatus() == IOSlot::Status::ReadSubmitted || slot->GetStatus() == IOSlot::Status::WriteSubmitted)
@@ -455,7 +534,7 @@ protected:
         // TODO: change to batch submit later
         int submitted = 0;
 
-        for (auto &slot_up : m_slots)
+        for (auto &slot_up : mRWSlots)
         {
             auto slot = slot_up.get();
             // prepare read io
@@ -519,7 +598,7 @@ protected:
         int submitted = 0;
 
         // 找出所有可以提交写请求的slot并提交写请求
-        for (auto &slot_up : m_slots)
+        for (auto &slot_up : mRWSlots)
         {
             auto slot = slot_up.get();
             // prepare write io
@@ -551,7 +630,7 @@ protected:
         mLogger->warn("Current IOSlot statuses:");
         // 按状态统计slot数量，并打印每个状态slot的数量
         std::map<IOSlot::Status, int> status_count;
-        for (auto &slot_up : m_slots)
+        for (auto &slot_up : mRWSlots)
         {
             auto slot = slot_up.get();
             status_count[slot->GetStatus()]++;
@@ -564,7 +643,7 @@ protected:
     }
     void Reset()
     {
-        for (auto &slot_up : m_slots)
+        for (auto &slot_up : mRWSlots)
         {
             if (slot_up)
             {
@@ -602,6 +681,86 @@ protected:
         return {};
     };
 
+    // Shared completion handlers for backends to call after extracting event data.
+    // These encapsulate the common logic for handling read/write completions so
+    // that backend implementations (libaio / io_uring) don't duplicate it.
+    tl::expected<void, StackError> HandleReadCompletion(SlotType *slot, ssize_t io_ret)
+    {
+        assert(slot != nullptr);
+        // mark as reaped
+        slot->SetStatus(IOSlot::Status::ReadReaped);
+        auto [offset, io_size] = slot->GetIOInfo();
+
+        if (io_ret < 0)
+        {
+            if (io_ret == -EAGAIN)
+            {
+                mLogger->warn("AIO read got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
+                              slot->GetID(), offset, io_size);
+                PrtSlots();
+                // ask backend to re-prepare this read (derived class implements PrepareOneRead)
+                PrepareOneRead(slot, offset, slot->GetCPFPPtr());
+                return {};
+            }
+            return tl::unexpected(StackError("AIO read failed, errno: " + std::to_string(-io_ret)));
+        }
+
+        if (io_ret == 0)
+        {
+            return tl::unexpected(StackError("AIO read returned 0 bytes read, unexpected."));
+        }
+
+        mLogger->debug("AIO read completed for slot ID: {}, offset: {}, bytes read: {}, slot addr: {:p}",
+                       slot->GetID(), offset, io_ret, static_cast<void *>(slot));
+
+        // prepare write io using the actual bytes read
+        off_t write_offset = offset;
+        slot->SetIOInfo(write_offset, static_cast<size_t>(io_ret));
+        PrepareOneWrite(slot);
+
+        return {};
+    }
+
+    tl::expected<void, StackError> HandleWriteCompletion(SlotType *slot, ssize_t io_ret)
+    {
+        assert(slot != nullptr);
+        slot->SetStatus(IOSlot::Status::WriteReaped);
+        auto [offset, io_size] = slot->GetIOInfo();
+
+        if (io_ret < 0)
+        {
+            if (io_ret == -EAGAIN)
+            {
+                mLogger->warn("AIO write got EAGAIN, resubmitting for slot ID: {}, offset: {}, io_size: {}",
+                              slot->GetID(), offset, io_size);
+                PrtSlots();
+                PrepareOneWrite(slot);
+                return {};
+            }
+            return tl::unexpected(StackError(
+                fmt::format("AIO write failed, errno: {}, errstr: {}, offset: {}, io_size: {}",
+                            io_ret, strerror(-io_ret), offset, io_size)));
+        }
+
+        if (io_ret == 0)
+        {
+            return tl::unexpected(StackError("AIO write returned 0 bytes written, unexpected."));
+        }
+
+        mLogger->debug("AIO write completed for slot ID: {}, offset: {}, bytes written: {}, src/dst info unknown", slot->GetID(), offset, io_ret);
+
+        // update written bytes and check completion
+        slot->GetCPFPPtr()->UpdateWrittenBytes(io_ret);
+
+        auto check_res = CheckOneCompleted(slot);
+        if (!check_res)
+        {
+            return tl::unexpected(StackError("CheckOneCompleted() failed after write reap, err: ", check_res.error()));
+        }
+
+        return {};
+    }
+
 private:
     virtual tl::expected<void, StackError> Init() = 0;
     virtual void PrepareOneRead(SlotType *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt) = 0;
@@ -611,7 +770,8 @@ private:
     virtual tl::expected<void, StackError> IOReap() = 0;
 
 protected:
-    std::vector<std::unique_ptr<SlotType>> m_slots;
+    std::vector<std::unique_ptr<SlotType>> mRWSlots;
+    std::vector<std::unique_ptr<SlotType>> mCksumSlots;
 
     RWCombinedCopyOptions m_options;
     CPFilePairMgr *mCPFPMgr;

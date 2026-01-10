@@ -3,6 +3,7 @@
     "LogMode": "console",
     "LogFilePath": "./acp.log",
     "CopyEngine": "liburing",
+    "CopyMode": "CksumCopy",
     "CopyParallelism": 1,
     "EnableInotify": false,
     "PreserveSparseFiles": true,
