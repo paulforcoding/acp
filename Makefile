@@ -43,11 +43,19 @@ TEST_BIN := tests/test_all
 .PHONY: test
 test: $(TEST_BIN)
 
-$(TEST_BIN): $(TEST_OBJS) $(CATCH_OBJ)
-	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -o $(TEST_BIN) $(TEST_OBJS) $(CATCH_OBJ) -pthread
+# Implementation objects required by tests (provide symbols used by test code)
+IMPLEMENTATION_OBJS := lib/combined/combined.o base/base.o lib/acp/acp.o
 
-%.o: %.cpp
+$(TEST_BIN): $(TEST_OBJS) $(CATCH_OBJ) $(IMPLEMENTATION_OBJS)
+	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -o $@ $^ -pthread $(LDFLAGS)
+
+# Compile rules: tests and vendored Catch2
+tests/%.o: tests/%.cpp
 	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -c $< -o $@
 
-$(CATCH_OBJ): $(CATCH_SRC)
+lib/thirdparty/catch2/%.o: lib/thirdparty/catch2/%.cpp
 	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -c $< -o $@
+
+# Default rule for project sources (depend on config.h)
+%.o: %.cpp config.h
+	$(CXX) $(CXXFLAGS) -c $< -o $@

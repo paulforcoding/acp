@@ -50,3 +50,4 @@ acp
 testdata/
 tests/test_channel
 acp.log
+tests/test_all
