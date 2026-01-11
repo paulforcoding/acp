@@ -1,6 +1,6 @@
 {
     "LogLevel": "trace",
-    "LogMode": "file",
+    "LogMode": "console",
     "LogFilePath": "./acp.log",
     "CopyEngine": "libaio",
     "CopyMode": "CksumOnly",
