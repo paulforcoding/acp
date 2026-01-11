@@ -6,9 +6,8 @@
 
 tl::expected<void, StackError> AIOSlotMgr::Init()
 {
-
     io_context_t ctx = 0;
-    int ret = io_setup(static_cast<unsigned>(mRWSlots.size()), &ctx);
+    int ret = io_setup(static_cast<unsigned>(mRWSlots.size() + mCksumSlots.size()), &ctx);
     if (ret < 0)
     {
         return tl::unexpected(StackError("io_setup() failed, errno: " + std::to_string(-ret)));
@@ -18,22 +17,13 @@ tl::expected<void, StackError> AIOSlotMgr::Init()
     return {};
 }
 
-void AIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt)
+void AIOSlotMgr::prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
 {
     auto iocb{slot->InitReadIOCB()};
-    size_t io_size = m_options.IoSize;
-
-    mLogger->trace("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, iocb addr: {:p}, src: {}, dst: {}",
-                   slot->GetID(), offset, io_size, static_cast<void *>(iocb),
-                   currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
-    io_prep_pread(iocb, currCPFPIt->GetSrcFd(), slot->GetBuf(), io_size, offset);
+    io_prep_pread(iocb, fd, buf, ioSize, offset);
     iocb->data = slot; // associate slot with this iocb
     // iocb->aio_rw_flags |= RWF_NOWAIT;
-    slot->SetCPFPPtr(currCPFPIt);
-    slot->SetIOInfo(offset, io_size);
-    slot->SetStatus(IOSlot::Status::ReadPrepared);
-    currCPFPIt->UpdateReadBytes(io_size);
-    mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
+
     return;
 }
 tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
@@ -142,7 +132,7 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
 tl::expected<void, StackError> AIOSlotMgr::ReapRead(struct io_event *ev)
 {
 
-    ssize_t io_ret = ev->res;    
+    ssize_t io_ret = ev->res;
     IOSlot *slot = static_cast<IOSlot *>(ev->data);
     assert(slot->GetStatus() == IOSlot::Status::ReadSubmitted);
     return HandleReadCompletion(slot, io_ret);
@@ -163,7 +153,7 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     const int max_events = static_cast<int>(mRWSlots.size());
     struct io_event events[max_events];
     struct timespec timeout;
-    timeout.tv_sec = 10;
+    timeout.tv_sec = m_options.IOReapWait;
     timeout.tv_nsec = 0;
 
 #ifndef NDEBUG
@@ -211,4 +201,3 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
 
     return {};
 }
-

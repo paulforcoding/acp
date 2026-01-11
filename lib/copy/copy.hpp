@@ -34,11 +34,11 @@ public:
             auto pop_res = channel.Pop();
             if (!pop_res)
             {
-                mLogger->debug("Channel is closed or empty, finishing adding file pairs.");
+                mLogger->debug("CopyEngine.RunChannel(): finishing pop file pairs from CopyEngine.");
                 break; // exit loop
             }
             auto copy_entry = std::move(pop_res.value());
-            mLogger->debug("CopyEngine: Adding file pair: src: {}, dst: {}",
+            mLogger->debug("CopyEngine.RunChannel(): Adding file pair: src: {}, dst: {}",
                            copy_entry->srcPath, copy_entry->dstPath);
             auto &cpfpMgr = cpfpMgrs[round_robin_idx];
             round_robin_idx = (round_robin_idx + 1) % cpfpMgrs.size();
@@ -82,10 +82,10 @@ private:
         }
 
         slotMgr->SetFuncDurationStat(mFuncDurationStat);
-        auto run_res = slotMgr->RunCopyQueue();
+        auto run_res = slotMgr->RunQueue();
         if (!run_res)
         {
-            mLogger->error("CopyEngine::RunChannel: RunCopyQueue() failed, err: {}", run_res.error().ToString());
+            mLogger->error("CopyEngine::RunChannel: RunQueue() failed, err: {}", run_res.error().ToString());
         }
     };
 

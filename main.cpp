@@ -31,6 +31,8 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     options.LogMode = data["LogMode"];
     options.LogFilePath = data["LogFilePath"];
     options.CopyEngine = data["CopyEngine"];
+    options.CopyMode = data["CopyMode"];
+    options.CksumAlgorithm = data["CksumAlgorithm"];
     options.CopyParallelism = data["CopyParallelism"];
     options.DirectIO = data["DirectIO"];
     options.EnableInotify = data["EnableInotify"];
@@ -45,6 +47,7 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
     if (options.LogMode == "file")
     {
         auto logger = spdlog::basic_logger_mt("file", options.LogFilePath);
+        logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
         myLogger = std::make_shared<SpdLogger>(spdlog::get("file"));
         myLogger->set_level(options.LogLevel);
         return myLogger;
@@ -52,6 +55,7 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
     else
     {
         auto logger = spdlog::stdout_color_mt("console");
+        logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
         myLogger = std::make_shared<SpdLogger>(spdlog::get("console"));
         myLogger->set_level(options.LogLevel);
         return myLogger;

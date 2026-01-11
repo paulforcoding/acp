@@ -198,6 +198,7 @@ public:
         // deduplication check, using unordered_set for O(1) lookup
         if (mQueueIdx.find(std::string(key)) != mQueueIdx.end())
         {
+            // std::cout << "Deduplication: " << std::string(key) << std::endl;
             return; // item already exists, do not add
         }
 

@@ -5,7 +5,8 @@
 # If config.mk doesn't exist, provide defaults
 CXX ?= g++
 CXXFLAGS ?= -g -std=c++20 -Wall -Wextra -I. -O2
-LDFLAGS ?= -laio
+# Linker flags: async IO + crypto/hash libs
+LDFLAGS ?= -laio -luring -lcrypto -lssl -lxxhash
 
 SOURCES ?= main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
 OBJECTS = $(SOURCES:.cpp=.o)

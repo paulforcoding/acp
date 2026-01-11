@@ -5,7 +5,7 @@
 
 tl::expected<void, StackError> UIOSlotMgr::Init()
 {
-    int ret = io_uring_queue_init(static_cast<int>(mRWSlots.size()), &m_ring, 0);
+    int ret = io_uring_queue_init(static_cast<int>(mRWSlots.size() + mCksumSlots.size()), &m_ring, 0);
     if (ret < 0)
     {
         return tl::unexpected(StackError(fmt::format("io_uring_queue_init() failed, errno: {}", -ret)));
@@ -13,21 +13,11 @@ tl::expected<void, StackError> UIOSlotMgr::Init()
     return {};
 }
 
-void UIOSlotMgr::PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt)
+void UIOSlotMgr::prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe(&m_ring);
-    size_t io_size = m_options.IoSize;
-    mLogger->debug("Preparing read IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                   slot->GetID(), offset, io_size, currCPFPIt->GetSrcPath(), currCPFPIt->GetDstPath());
-
-    io_uring_prep_read(sqe, currCPFPIt->GetSrcFd(), slot->GetBuf(), io_size, offset);
+    io_uring_prep_read(sqe, fd, buf, ioSize, offset);
     io_uring_sqe_set_data(sqe, slot);
-    slot->SetCPFPPtr(currCPFPIt);
-    slot->SetIOInfo(offset, io_size);
-
-    slot->SetStatus(IOSlot::Status::ReadPrepared);
-    currCPFPIt->UpdateReadBytes(io_size);
-    mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
 }
 
 tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
@@ -162,4 +152,3 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
 
     return {};
 }
-

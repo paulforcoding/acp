@@ -6,8 +6,15 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        size_t io_size,
                        bool direct_io,
                        bool sync_writes,
+                       bool cksum,
                        std::shared_ptr<ILogger> logger)
-    : m_src_path(src_path), m_dst_path(dst_path), mIOSize(io_size), mDirectIO(direct_io), mSyncWrites(sync_writes), mLogger(logger)
+    : m_src_path(src_path),
+      m_dst_path(dst_path),
+      mIOSize(io_size),
+      mDirectIO(direct_io),
+      mSyncWrites(sync_writes),
+      mCksum(cksum),
+      mLogger(logger)
 {
     bzero(&m_src_stat, sizeof(struct stat));
     bzero(&m_dst_stat, sizeof(struct stat));
@@ -101,15 +108,20 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     }
 
     mLogger->trace("Opening/creating destination file: {}", m_dst_path);
-    // check destination file
-    if (mDirectIO)
+    int dstOpenFlags = O_CREAT;
+    if (mCksum)
     {
-        m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_DIRECT | O_TRUNC, 0644);
+        dstOpenFlags |= O_RDWR;
     }
     else
     {
-        m_dst_fd = open(m_dst_path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        dstOpenFlags |= O_WRONLY | O_TRUNC;
     }
+    if (mDirectIO)
+    {
+        dstOpenFlags |= O_DIRECT;
+    }
+    m_dst_fd = open(m_dst_path.c_str(), dstOpenFlags, 0644);
 
     if (m_dst_fd < 0)
     {
@@ -154,8 +166,7 @@ AGAIN:
             {
                 mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
                               (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().ToString());
-                mFilePairs.erase(mReadPtr);
-                mReadPtr = mFilePairs.begin();
+                ReadPtrAdvance(*mReadPtr);
                 goto AGAIN;
             }
 
@@ -181,21 +192,26 @@ AGAIN:
 
         // call CheckWriteComplete(mReadPtr) in future to 统一做copy收尾工作
 
-        // remove directory entries from mFilePairs
-        mFilePairs.erase(mReadPtr);
-        mReadPtr = mFilePairs.begin();
+        ReadPtrAdvance(*mReadPtr);
         goto AGAIN;
     }
 
-    if ((*mReadPtr)->IsReadFinished())
+    // mLogger->trace("CheckReadComplete(): src: {}, dst: {}, preparedReadBytes: {}, totalBytes: {}, IsReadFinished: {}",
+    //                (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(),
+    //                (*mReadPtr)->GetReadOffset(), (*mReadPtr)->GetSrcFileSize(), (*mReadPtr)->IsReadFinished());
+    // if ((*mReadPtr)->IsReadFinished())
+    // {
+    //     CheckReadCompleteNoLock(*mReadPtr);
+
+    //     goto AGAIN;
+    //     // make sure to return a initialized and not-finished file pair,
+    //     // and make sure 0-size files are get popped from mFilePairs to mInflightFPs
+    // }
+    if (CheckReadCompleteNoLock(*mReadPtr))
     {
-        CheckReadCompleteNoLock(*mReadPtr);
-
         goto AGAIN;
-        // make sure to return a initialized and not-finished file pair,
-        // and make sure 0-size files are get popped from mFilePairs to mInflightFPs
     }
-    mLogger->debug("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
+    mLogger->trace("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
                    (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), (*mReadPtr)->GetReadOffset());
     return *mReadPtr;
 }
@@ -203,30 +219,31 @@ AGAIN:
 void CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
 {
     std::lock_guard<std::mutex> lock(mMutex);
+    CheckReadCompleteNoLock(pFP);
+}
+
+bool CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
+{
+    mLogger->trace("CheckReadCompleteNoLock(): src: {}, dst: {}, preparedReadBytes: {}, totalBytes: {}, IsReadFinished: {}",
+                   pFP->GetSrcPath(), pFP->GetDstPath(),
+                   pFP->GetReadOffset(), pFP->GetSrcFileSize(), pFP->IsReadFinished());
 
     if (pFP->IsReadFinished())
     {
-        CheckReadCompleteNoLock(pFP);
+        mInflightFPs.Push(pFP, pFP->GetSrcPath());
+
+        // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
+        if ((pFP)->IsInitialized() && (pFP)->GetSrcFileSize() == 0)
+        {
+            mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
+                           (pFP)->GetSrcPath(), (pFP)->GetDstPath());
+            CheckWriteComplete(pFP); // directly check write complete for 0-size files
+        }
+
+        ReadPtrAdvance(pFP);
+        return true;
     }
-}
-
-void CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
-{
-    mInflightFPs.Push(pFP, pFP->GetSrcPath());
-
-    mLogger->debug("Completed reading file pair: src: {}, dst: {}, size: {}, inflight pairs: {}",
-                   pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
-
-    // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
-    if ((pFP)->IsInitialized() && (pFP)->GetSrcFileSize() == 0)
-    {
-        mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
-                       (pFP)->GetSrcPath(), (pFP)->GetDstPath());
-        CheckWriteComplete(pFP); // directly check write complete for 0-size files
-    }
-
-    mFilePairs.erase(mReadPtr); // mReadPtr指向的元素被移除后，mReadPtr就不再准确了，需要重新指向begin()
-    mReadPtr = mFilePairs.begin();
+    return false;
 }
 
 tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr<CPFilePair> pFP)
@@ -258,6 +275,16 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
         mLogger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
                        pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
+        if (mInflightFPs.Size() > 0)
+        {
+            mLogger->debug("Inflight file pairs:");
+            for (const auto &fp : mInflightFPs.GetList())
+            {
+                mLogger->debug("  src: {}, dst: {}, read_offset: {}, write_offset: {}",
+                               fp->GetSrcPath(), fp->GetDstPath(),
+                               fp->GetReadOffset(), fp->GetWriteOffset());
+            }
+        }
         // 从inflight列表中移除
         mInflightFPs.Remove(pFP, pFP->GetSrcPath());
     }

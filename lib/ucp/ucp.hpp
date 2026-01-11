@@ -25,13 +25,11 @@ public:
 
 private:
     tl::expected<void, StackError> Init() override;
-    void PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt) override;
+    void prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
     void PrepareOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> IOReap() override;
-    // tl::expected<void, StackError> CheckOneCompleted(IOSlot *slot) override;
-
     tl::expected<void, StackError> ReapRead(IOSlot *slot, io_uring_cqe *cqe);
     tl::expected<void, StackError> ReapWrite(IOSlot *slot, io_uring_cqe *cqe);
 

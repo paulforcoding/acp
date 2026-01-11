@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstring> // strerror
 #include <cerrno>
+#include <tl/expected.hpp>
 #include "base/logger.hpp"
 
 #define SECTORSIZE 512
@@ -58,6 +59,12 @@ public:
     static StackError FromErrno(int errnum)
     {
         return StackError(fmt::format("{}: {}", strerror(errnum), errnum), errnum);
+    }
+
+    template <typename... Args>
+    static StackError FromFormat(const StackError &err, std::string_view fmt_str, Args &&...args)
+    {
+        return StackError(fmt::format(fmt_str, std::forward<Args>(args)...), err);
     }
 
     // return a new StackError with extra context
@@ -106,6 +113,18 @@ private:
     int m_code = 0;                 // lastest error code, 0 if not applicable
     mutable std::string m_full_msg; // cached what() result
 };
+
+template <typename... Args>
+tl::unexpected<StackError> MakeStackError(std::string_view fmt_str, Args &&...args)
+{
+    return tl::unexpected(StackError(fmt::format(fmt_str, std::forward<Args>(args)...)));
+}
+
+template <typename... Args>
+tl::unexpected<StackError> MakeStackError(const StackError &prev, std::string_view fmt_str, Args &&...args)
+{
+    return tl::unexpected(StackError(fmt::format(fmt_str, std::forward<Args>(args)...), prev));
+}
 
 // // Logger functions
 // void InitGlobalConsoleLogger(spdlog::level::level_enum log_level);

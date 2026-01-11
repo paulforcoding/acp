@@ -30,7 +30,7 @@ public:
 private:
     // implement virtual functions from IOSlotMgr
     tl::expected<void, StackError> Init() override;
-    void PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt) override;
+    void prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
     void PrepareOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override;
