@@ -40,6 +40,9 @@ void FreeBytes(T &p)
     p = nullptr;
 }
 
+template <typename... Args>
+using format_string_t = fmt::format_string<Args...>;
+
 // 此class是结合tl::expected使用的，用于串联函数调用栈各函数的返回值，not thread-safe
 class StackError
 {
@@ -55,32 +58,24 @@ public:
         m_stack.emplace_back(std::string(msg));
     }
 
-    // convenience
+    // convenience static methods
     static StackError FromErrno(int errnum)
     {
         return StackError(fmt::format("{}: {}", strerror(errnum), errnum), errnum);
     }
 
     template <typename... Args>
-    static StackError FromFormat(const StackError &err, std::string_view fmt_str, Args &&...args)
+    static StackError FromFormat(format_string_t<Args...> fmt_str, Args &&...args)
     {
-        return StackError(fmt::format(fmt_str, std::forward<Args>(args)...), err);
+        auto msg = fmt::format(fmt_str, std::forward<Args>(args)...);
+        return StackError(msg);
     }
 
-    // return a new StackError with extra context
-    // example: err = err.WithContext("while processing file X"); return tl::unexpected(err);
-    StackError WithContext(std::string_view ctx) const
+    template <typename... Args>
+    void Append(format_string_t<Args...> fmt_str, Args &&...args)
     {
-        StackError copy = *this;
-        copy.m_stack.emplace_back(std::string(ctx));
-        copy.m_full_msg.clear();
-        return copy;
-    }
-
-    // append in-place (useful in some flows)
-    void AppendContext(std::string_view ctx)
-    {
-        m_stack.emplace_back(std::string(ctx));
+        auto msg = fmt::format(fmt_str, std::forward<Args>(args)...);
+        m_stack.emplace_back(msg);
         m_full_msg.clear();
     }
 
@@ -114,16 +109,9 @@ private:
     mutable std::string m_full_msg; // cached what() result
 };
 
-template <typename... Args>
-tl::unexpected<StackError> MakeStackError(std::string_view fmt_str, Args &&...args)
+inline tl::unexpected<StackError> Unexpt(const StackError &se)
 {
-    return tl::unexpected(StackError(fmt::format(fmt_str, std::forward<Args>(args)...)));
-}
-
-template <typename... Args>
-tl::unexpected<StackError> MakeStackError(const StackError &prev, std::string_view fmt_str, Args &&...args)
-{
-    return tl::unexpected(StackError(fmt::format(fmt_str, std::forward<Args>(args)...), prev));
+    return tl::unexpected(se);
 }
 
 // // Logger functions

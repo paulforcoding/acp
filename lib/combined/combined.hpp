@@ -39,6 +39,7 @@ struct RWCombinedCopyOptions
     std::string CopyMode;       // "CksumCopy", "CopyOnly", "CksumOnly"
     std::string CksumAlgorithm; // "xxhash64", "md5", "sha256"
     int CopyParallelism;
+    int CopyChanSize;
     bool EnableInotify;
     bool PreserveSparseFiles;
     bool DirectIO = false;
@@ -121,6 +122,7 @@ public:
     void SetWriteFinished() { mWrittenBytes = GetSrcFileSize(); }
     bool IsInitialized() const { return (m_src_fd >= 0 && m_dst_fd >= 0) || IsDir(); }
     bool IsDir() const { return mIsDir; }
+    bool IsSymlink() const { return mIsSymlink; }
 
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
@@ -141,6 +143,7 @@ private:
     bool mCksum = false;
 
     bool mIsDir = false;
+    bool mIsSymlink = false;
 
     bool mIsChksumError = false;
 
@@ -194,7 +197,11 @@ public:
     bool ShouldStopCopy()
     {
         std::lock_guard<std::mutex> lock(mMutex);
-        auto should = (mStopFlag.load() && mReadPtr == mFilePairs.end() && mStartFlag.load() && mFilePairs.empty() && mInflightFPs.Empty());
+        auto should = (mStopFlag.load() &&
+                       mReadPtr == mFilePairs.end() &&
+                       mStartFlag.load() &&
+                       mFilePairs.empty() &&
+                       mInflightFPs.Empty());
         if (!should)
         {
             mLogger->debug("ShouldStopCopy() == false: StopFlag: {}, ReadPtr at end: {}, StartFlag: {}, FilePairs empty: {}, InflightFPs empty: {}",
@@ -214,16 +221,16 @@ public:
                 }
             }
 
-            // if (!mInflightFPs.Empty())
-            // {
-            //     mLogger->debug("Inflight file pairs:");
-            //     for (const auto &fp : mInflightFPs.GetList())
-            //     {
-            //         mLogger->debug("  src: {}, dst: {}, read_offset: {}, write_offset: {}",
-            //                        fp->GetSrcPath(), fp->GetDstPath(),
-            //                        fp->GetReadOffset(), fp->GetWriteOffset());
-            //     }
-            // }
+            if (!mInflightFPs.Empty())
+            {
+                mLogger->debug("Inflight file pairs:");
+                for (const auto &fp : mInflightFPs.GetList())
+                {
+                    mLogger->debug("  src: {}, dst: {}, read_offset: {}, write_offset: {}",
+                                   fp->GetSrcPath(), fp->GetDstPath(),
+                                   fp->GetReadOffset(), fp->GetWriteOffset());
+                }
+            }
         }
         return should;
     }
@@ -292,12 +299,6 @@ public:
             return "ReadSubmitted";
         case Status::ReadReaped:
             return "ReadReaped";
-            // case Status::CksumReadPrepared:
-            //     return "CksumReadPrepared";
-            // case Status::CksumReadSubmitted:
-            //     return "CksumReadSubmitted";
-            // case Status::CksumReadReaped:
-            return "CksumReadReaped";
         case Status::WritePrepared:
             return "WritePrepared";
         case Status::WriteSubmitted:

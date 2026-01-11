@@ -26,6 +26,8 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     // check if source file is symlink, if so, create a coresponding symlink on dst path
     if (fs::is_symlink(m_src_path))
     {
+        mIsSymlink = true;
+
         std::error_code ec;
         auto target_path = fs::read_symlink(m_src_path, ec);
         if (ec)
@@ -33,6 +35,20 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             return tl::unexpected(StackError(
                 fmt::format("Failed to read symlink target of source file: {}, errstr: {}", m_src_path, ec.message())));
         }
+
+        // we must remove existing dst_path first if any
+        // Note: std::filesystem::exists() follows symlinks. For a dangling symlink,
+        // exists() returns false even though the symlink entry exists. Handle both.
+        if (fs::is_symlink(fs::symlink_status(m_dst_path)) || fs::exists(m_dst_path))
+        {
+            fs::remove(m_dst_path, ec); // removes the symlink itself if it's a symlink
+            if (ec)
+            {
+                return tl::unexpected(StackError(
+                    fmt::format("Failed to remove existing destination path: {}, errstr: {}", m_dst_path, ec.message())));
+            }
+        }
+
         fs::create_symlink(target_path, m_dst_path, ec);
         if (ec)
         {
@@ -151,7 +167,7 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
 AGAIN:
     if (mReadPtr == mFilePairs.end())
     {
-        mLogger->debug("GetNextReadIO() ended");
+        mLogger->trace("GetNextReadIO() ended");
         return nullptr; // already at end
     }
     // now mReadPtr points to a valid file pair
@@ -169,44 +185,35 @@ AGAIN:
                 ReadPtrAdvance(*mReadPtr);
                 goto AGAIN;
             }
-
-            return tl::unexpected(StackError("(*mReadPtr)->CheckAndInit(), err: ", init_res.error()));
+            init_res.error().Append("(*mReadPtr)->CheckAndInit(), err: ");
+            return Unexpt(init_res.error());
         }
     }
 
-    if ((*mReadPtr)->IsDir())
+    if ((*mReadPtr)->IsDir() || (*mReadPtr)->IsSymlink())
     {
-        namespace fs = std::filesystem;
-        // make dirs at dest, return error if failed
-        mLogger->trace("mkdir for src: {}, dst: {}",
-                       (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
+        // CheckAndInit()已经处理好了目录和Symlink，这里直接跳过
 
-        std::error_code ec;
-        fs::create_directories((*mReadPtr)->GetDstPath(), ec);
-        if (ec)
-        {
-            return tl::unexpected(StackError(
-                fmt::format("Failed to create destination directory: {}, errstr: {}",
-                            (*mReadPtr)->GetDstPath(), ec.message())));
-        }
+        // namespace fs = std::filesystem;
+        // // make dirs at dest, return error if failed
+        // mLogger->trace("mkdir for src: {}, dst: {}",
+        //                (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
 
-        // call CheckWriteComplete(mReadPtr) in future to 统一做copy收尾工作
+        // std::error_code ec;
+        // fs::create_directories((*mReadPtr)->GetDstPath(), ec);
+        // if (ec)
+        // {
+        //     return tl::unexpected(StackError(
+        //         fmt::format("Failed to create destination directory: {}, errstr: {}",
+        //                     (*mReadPtr)->GetDstPath(), ec.message())));
+        // }
+
+        // TODO: call CheckWriteComplete(mReadPtr) in future to 统一做copy收尾工作
 
         ReadPtrAdvance(*mReadPtr);
         goto AGAIN;
     }
 
-    // mLogger->trace("CheckReadComplete(): src: {}, dst: {}, preparedReadBytes: {}, totalBytes: {}, IsReadFinished: {}",
-    //                (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(),
-    //                (*mReadPtr)->GetReadOffset(), (*mReadPtr)->GetSrcFileSize(), (*mReadPtr)->IsReadFinished());
-    // if ((*mReadPtr)->IsReadFinished())
-    // {
-    //     CheckReadCompleteNoLock(*mReadPtr);
-
-    //     goto AGAIN;
-    //     // make sure to return a initialized and not-finished file pair,
-    //     // and make sure 0-size files are get popped from mFilePairs to mInflightFPs
-    // }
     if (CheckReadCompleteNoLock(*mReadPtr))
     {
         goto AGAIN;

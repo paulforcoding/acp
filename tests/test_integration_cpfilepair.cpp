@@ -23,7 +23,7 @@ TEST_CASE("CPFilePair CheckAndInit with real file", "[integration][cpfilepair]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePair p(src, dst, opts.IoSize, opts.DirectIO, opts.SyncWrites, logger);
+    CPFilePair p(src, dst, opts.IoSize, opts.DirectIO, opts.SyncWrites, /*cksum*/ false, logger);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 
@@ -35,4 +35,3 @@ TEST_CASE("CPFilePair CheckAndInit with real file", "[integration][cpfilepair]")
     // cleanup
     fs::remove_all(dst_dir, ec);
 }
-

@@ -45,7 +45,7 @@ TEST_BIN := tests/test_all
 test: $(TEST_BIN)
 
 # Implementation objects required by tests (provide symbols used by test code)
-IMPLEMENTATION_OBJS := lib/combined/combined.o base/base.o lib/acp/acp.o
+IMPLEMENTATION_OBJS := lib/combined/combined.o base/base.o lib/acp/acp.o lib/mainlib.o lib/ucp/ucp.o
 
 $(TEST_BIN): $(TEST_OBJS) $(CATCH_OBJ) $(IMPLEMENTATION_OBJS)
 	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -o $@ $^ -pthread $(LDFLAGS)

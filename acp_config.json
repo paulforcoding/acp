@@ -6,6 +6,7 @@
     "CopyMode": "CksumOnly",
     "CksumAlgorithm": "xxhash64",
     "CopyParallelism": 1,
+    "CopyChanSize": 10,
     "EnableInotify": false,
     "PreserveSparseFiles": true,
     "DirectIO": false,

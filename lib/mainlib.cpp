@@ -51,7 +51,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             });
     }
     // 开始创建各种对象，注入依赖
-    Channel<CopyEntry> copyChannel(1024);
+    Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);
 
@@ -128,7 +128,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 
 int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger)
 {
-    Channel<CopyEntry> copyChannel(1024);
+    Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);
 
