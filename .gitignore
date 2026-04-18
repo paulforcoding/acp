@@ -54,3 +54,9 @@ tests/test_all
 gdb_run_output.txt
 acp_log.txt
 cksum_result.log
+
+# ai
+CLAUDE.md
+.aireports/
+.aiinputs/
+.claude/

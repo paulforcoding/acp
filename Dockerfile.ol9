@@ -1,0 +1,34 @@
+# Oracle Linux 9 build/debug/test environment for acp
+FROM oraclelinux:9
+
+# Enable EPEL and CodeReady Builder (CRB) for development packages
+RUN dnf install -y oracle-epel-release-el9 \
+    && dnf config-manager --set-enabled ol9_codeready_builder \
+    && dnf config-manager --set-enabled ol9_developer_EPEL \
+    && dnf clean all
+
+# Install build dependencies
+RUN dnf install -y \
+    gcc gcc-c++ make cmake git gdb curl \
+    libaio-devel \
+    spdlog-devel \
+    fmt-devel \
+    openssl-devel \
+    xxhash-devel \
+    liburing-devel \
+    ninja-build \
+    && dnf clean all
+
+# Install missing tl::expected header (not packaged in OL9/EPEL)
+RUN mkdir -p /usr/include/tl \
+    && curl -L -o /usr/include/tl/expected.hpp \
+       https://raw.githubusercontent.com/TartanLlama/expected/master/include/tl/expected.hpp
+
+# The spdlog-devel package in EPEL is missing bundled fmt headers;
+# it expects external fmt. Append this flag so spdlog uses system fmt.
+ENV CXXFLAGS="-g -std=c++20 -Wall -Wextra -I. -O2 -DSPDLOG_FMT_EXTERNAL"
+
+WORKDIR /acp
+
+# Default: keep container running for interactive use
+CMD ["/bin/bash"]
