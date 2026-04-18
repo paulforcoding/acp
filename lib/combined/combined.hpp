@@ -463,70 +463,70 @@ public:
         return mRWSlots[id].get();
     }
 
-    tl::expected<void, StackError> RunCopyQueue()
-    {
-        while (!mCPFPMgr->ShouldStartCopy())
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (mCPFPMgr->ShouldStopCopy())
-            {
-                mLogger->debug("Received stop signal before starting copy queue.");
-                return {};
-            }
-        }
+//     tl::expected<void, StackError> RunCopyQueue()
+//     {
+//         while (!mCPFPMgr->ShouldStartCopy())
+//         {
+//             std::this_thread::sleep_for(std::chrono::milliseconds(100));
+//             if (mCPFPMgr->ShouldStopCopy())
+//             {
+//                 mLogger->debug("Received stop signal before starting copy queue.");
+//                 return {};
+//             }
+//         }
 
-        auto init_res = Init();
-        if (!init_res)
-        {
-            return tl::unexpected(init_res.error());
-        }
+//         auto init_res = Init();
+//         if (!init_res)
+//         {
+//             return tl::unexpected(init_res.error());
+//         }
 
-        long round = 0;
-        while (!mCPFPMgr->ShouldStopCopy())
-        {
+//         long round = 0;
+//         while (!mCPFPMgr->ShouldStopCopy())
+//         {
 
-#ifndef NDEBUG
-            auto start = std::chrono::high_resolution_clock::now();
-            auto submit_res = SubmitReads();
-            auto end = std::chrono::high_resolution_clock::now();
-            AddDuration("SubmitReads()", start, end);
-#else
-            auto submit_res = SubmitReads();
-#endif
+// #ifndef NDEBUG
+//             auto start = std::chrono::high_resolution_clock::now();
+//             auto submit_res = SubmitReads();
+//             auto end = std::chrono::high_resolution_clock::now();
+//             AddDuration("SubmitReads()", start, end);
+// #else
+//             auto submit_res = SubmitReads();
+// #endif
 
-            if (!submit_res)
-            {
-                return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
-            }
+//             if (!submit_res)
+//             {
+//                 return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
+//             }
 
-            mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
+//             mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
 
-            // auto check_stuck_res = CheckStuck();
-            // if (!check_stuck_res)
-            // {
-            //     return tl::unexpected(check_stuck_res.error());
-            // }
+//             // auto check_stuck_res = CheckStuck();
+//             // if (!check_stuck_res)
+//             // {
+//             //     return tl::unexpected(check_stuck_res.error());
+//             // }
 
-            auto reap_res = IOReap();
-            if (!reap_res)
-            {
-                return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
-            }
+//             auto reap_res = IOReap();
+//             if (!reap_res)
+//             {
+//                 return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
+//             }
 
-            auto write_res = SubmitWrites();
-            if (!write_res)
-            {
-                return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
-            }
-            mLogger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
+//             auto write_res = SubmitWrites();
+//             if (!write_res)
+//             {
+//                 return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
+//             }
+//             mLogger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
 
-            round++;
-        }
+//             round++;
+//         }
 
-        Reset();
+//         Reset();
 
-        return {};
-    }
+//         return {};
+//     }
 
     tl::expected<void, StackError> RunQueue()
     {

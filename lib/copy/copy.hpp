@@ -15,8 +15,8 @@ public:
 
     tl::expected<void, StackError> RunChannel(Channel<CopyEntry> &channel)
     {
-        // 根据options.CopyParallelism启动多个RunCopyQueue线程
-        mLogger->debug("CopyEngine: Starting {} RunCopyQueue threads.", mOptions.CopyParallelism);
+        // 根据options.CopyParallelism启动多个RunQueue线程
+        mLogger->debug("CopyEngine: Starting {} RunQueue threads.", mOptions.CopyParallelism);
         std::vector<std::thread> threads;
         threads.reserve(mOptions.CopyParallelism);
         std::vector<std::unique_ptr<CPFilePairMgr>> cpfpMgrs;
@@ -55,7 +55,7 @@ public:
             cpfpMgr->SetStopFlag();
         }
 
-        mLogger->debug("CopyEngine: Waiting for RunCopyQueue thread to finish...");
+        mLogger->debug("CopyEngine: Waiting for RunQueue thread to finish...");
         for (auto &t : threads)
         {
             if (t.joinable())
@@ -63,7 +63,7 @@ public:
                 t.join();
             }
         }
-        mLogger->debug("CopyEngine: All RunCopyQueue threads have finished.");
+        mLogger->debug("CopyEngine: All RunQueue threads have finished.");
 
         return {};
     }
