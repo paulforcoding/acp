@@ -12,7 +12,7 @@ NC='\033[0m' # No Color
 ENABLE_URING=0
 CXX=${CXX:-g++}
 CXXFLAGS=${CXXFLAGS:--g -std=c++20 -Wall -Wextra -O2}
-SOURCES = main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
+SOURCES="main.cpp lib/mainlib.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -192,14 +192,14 @@ EOF
 # Generate config.mk
 echo "Generating config.mk..."
 
-cat > config.mk << 'EOF'
+cat > config.mk << EOF
 # Auto-generated configuration makefile
 # DO NOT EDIT MANUALLY - run configure script instead
 
 CXX ?= g++
-CXXFLAGS = -g -std=c++20 -Wall -Wextra -I. -O2
-LDFLAGS = -laio
-SOURCES = main.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
+CXXFLAGS = ${CXXFLAGS}
+LDFLAGS = -laio -lcrypto -lssl -lxxhash
+SOURCES = ${SOURCES}
 EOF
 
 if [ $ENABLE_URING -eq 1 ]; then

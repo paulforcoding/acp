@@ -8,7 +8,7 @@ TEST_CASE("StackError basic behavior")
     std::string what = e.ToString();
     REQUIRE(what.find("first") != std::string::npos);
 
-    auto e2 = e.WithContext("second");
+    StackError e2("second", e, 42);
     REQUIRE(e2.Code() == 42);
     std::string what2 = e2.ToString();
     REQUIRE(what2.find("second") != std::string::npos);
