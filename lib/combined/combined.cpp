@@ -8,110 +8,110 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        bool sync_writes,
                        bool cksum,
                        std::shared_ptr<ILogger> logger)
-    : m_src_path(src_path),
-      m_dst_path(dst_path),
+    : mSrcPath(src_path),
+      mDstPath(dst_path),
       mIOSize(io_size),
       mDirectIO(direct_io),
       mSyncWrites(sync_writes),
       mCksum(cksum),
       mLogger(logger)
 {
-    bzero(&m_src_stat, sizeof(struct stat));
-    bzero(&m_dst_stat, sizeof(struct stat));
+    bzero(&mSrcStat, sizeof(struct stat));
+    bzero(&mDstStat, sizeof(struct stat));
 }
 
 tl::expected<void, StackError> CPFilePair::CheckAndInit()
 {
     namespace fs = std::filesystem;
     // check if source file is symlink, if so, create a coresponding symlink on dst path
-    if (fs::is_symlink(m_src_path))
+    if (fs::is_symlink(mSrcPath))
     {
         mIsSymlink = true;
 
         std::error_code ec;
-        auto target_path = fs::read_symlink(m_src_path, ec);
+        auto target_path = fs::read_symlink(mSrcPath, ec);
         if (ec)
         {
             return tl::unexpected(StackError(
-                fmt::format("Failed to read symlink target of source file: {}, errstr: {}", m_src_path, ec.message())));
+                fmt::format("Failed to read symlink target of source file: {}, errstr: {}", mSrcPath, ec.message())));
         }
 
         // we must remove existing dst_path first if any
         // Note: std::filesystem::exists() follows symlinks. For a dangling symlink,
         // exists() returns false even though the symlink entry exists. Handle both.
-        if (fs::is_symlink(fs::symlink_status(m_dst_path)) || fs::exists(m_dst_path))
+        if (fs::is_symlink(fs::symlink_status(mDstPath)) || fs::exists(mDstPath))
         {
-            fs::remove(m_dst_path, ec); // removes the symlink itself if it's a symlink
+            fs::remove(mDstPath, ec); // removes the symlink itself if it's a symlink
             if (ec)
             {
                 return tl::unexpected(StackError(
-                    fmt::format("Failed to remove existing destination path: {}, errstr: {}", m_dst_path, ec.message())));
+                    fmt::format("Failed to remove existing destination path: {}, errstr: {}", mDstPath, ec.message())));
             }
         }
 
-        fs::create_symlink(target_path, m_dst_path, ec);
+        fs::create_symlink(target_path, mDstPath, ec);
         if (ec)
         {
             return tl::unexpected(StackError(
                 fmt::format("Failed to create symlink at destination: {}, pointing to: {}, errstr: {}",
-                            m_dst_path, target_path.string(), ec.message())));
+                            mDstPath, target_path.string(), ec.message())));
         }
         mLogger->debug("Source is a symlink, created destination symlink: {} -> {}",
-                       m_dst_path, target_path.string());
+                       mDstPath, target_path.string());
         return {};
     }
 
     // check if source file is directory, create destination directory if so
-    if (fs::is_directory(m_src_path))
+    if (fs::is_directory(mSrcPath))
     {
         mIsDir = true;
         std::error_code ec;
-        fs::create_directories(m_dst_path, ec);
+        fs::create_directories(mDstPath, ec);
         if (ec)
         {
             return tl::unexpected(StackError(
-                fmt::format("Failed to create destination directory: {}, errstr: {}", m_dst_path, ec.message())));
+                fmt::format("Failed to create destination directory: {}, errstr: {}", mDstPath, ec.message())));
         }
-        mLogger->debug("Source is a directory, created destination directory: {}", m_dst_path);
+        mLogger->debug("Source is a directory, created destination directory: {}", mDstPath);
         return {};
     }
 
     // check if source file is not regular file, return error
-    if (!fs::is_regular_file(m_src_path))
+    if (!fs::is_regular_file(mSrcPath))
     {
         // std::filesystem::file_type is not directly formattable by fmt, cast to int for diagnostic
         return tl::unexpected(StackError(
-            fmt::format("src: {} is not supported file type: {}", m_src_path, static_cast<int>(fs::status(m_src_path).type()))));
+            fmt::format("src: {} is not supported file type: {}", mSrcPath, static_cast<int>(fs::status(mSrcPath).type()))));
     }
 
     // check source file
-    mLogger->trace("Opening source file: {}", m_src_path);
+    mLogger->trace("Opening source file: {}", mSrcPath);
     if (mDirectIO)
     {
-        m_src_fd = open(m_src_path.c_str(), O_RDONLY | O_DIRECT);
+        mSrcFd = open(mSrcPath.c_str(), O_RDONLY | O_DIRECT);
     }
     else
     {
-        m_src_fd = open(m_src_path.c_str(), O_RDONLY);
+        mSrcFd = open(mSrcPath.c_str(), O_RDONLY);
     }
 
-    if (m_src_fd < 0)
+    if (mSrcFd < 0)
     {
         return tl::unexpected(StackError(
-            fmt::format("open src file failed: {}, errno: {}, errstr: {}", m_src_path, errno, strerror(errno))));
+            fmt::format("open src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
     }
-    if (fstat(m_src_fd, &m_src_stat) < 0)
+    if (fstat(mSrcFd, &mSrcStat) < 0)
     {
         return tl::unexpected(StackError(
-            fmt::format("fstat() src file failed: {}, errno: {}, errstr: {}", m_src_path, errno, strerror(errno))));
+            fmt::format("fstat() src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
     }
-    if (!S_ISREG(m_src_stat.st_mode))
+    if (!S_ISREG(mSrcStat.st_mode))
     {
-        return tl::unexpected(StackError("Source file is not a regular file: " + m_src_path));
+        return tl::unexpected(StackError("Source file is not a regular file: " + mSrcPath));
     }
 
     // check dst file path, create if not exist
-    std::string dst_dir = fs::path(m_dst_path).parent_path().string();
+    std::string dst_dir = fs::path(mDstPath).parent_path().string();
     if (!fs::exists(dst_dir))
     {
         std::error_code ec;
@@ -123,7 +123,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
         }
     }
 
-    mLogger->trace("Opening/creating destination file: {}", m_dst_path);
+    mLogger->trace("Opening/creating destination file: {}", mDstPath);
     int dstOpenFlags = O_CREAT;
     if (mCksum)
     {
@@ -137,24 +137,24 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     {
         dstOpenFlags |= O_DIRECT;
     }
-    m_dst_fd = open(m_dst_path.c_str(), dstOpenFlags, 0644);
+    mDstFd = open(mDstPath.c_str(), dstOpenFlags, 0644);
 
-    if (m_dst_fd < 0)
+    if (mDstFd < 0)
     {
         return tl::unexpected(StackError(
-            fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
+            fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
     }
 
-    mLogger->debug("Initialized file pair: src: {}, dst: {}, size: {}", m_src_path, m_dst_path, GetSrcFileSize());
+    mLogger->debug("Initialized file pair: src: {}, dst: {}, size: {}", mSrcPath, mDstPath, GetSrcFileSize());
     return {};
 }
 
 tl::expected<void, std::string> CPFilePair::DoDstState()
 {
-    if (fstat(m_dst_fd, &m_dst_stat) < 0)
+    if (fstat(mDstFd, &mDstStat) < 0)
     {
         return tl::unexpected(fmt::format("Failed to fstat destination file: {}, errno: {}, errstr: {}",
-                                          m_dst_path, errno, strerror(errno)));
+                                          mDstPath, errno, strerror(errno)));
     }
 
     return {};
@@ -261,15 +261,15 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
     if (pFP->IsWriteFinished())
     {
-        if (m_options.DirectIO)
+        if (mOptions.DirectIO)
         {
-            auto truncate_res = pFP->TrucateDstToSrcSize();
+            auto truncate_res = pFP->TruncateDstToSrcSize();
             if (!truncate_res)
             {
-                return tl::unexpected(StackError("pFP->TrucateDstToSrcSize(), err: ", truncate_res.error()));
+                return tl::unexpected(StackError("pFP->TruncateDstToSrcSize(), err: ", truncate_res.error()));
             }
         }
-        if (m_options.SyncWrites && pFP->GetDstFileSize() > 0)
+        if (mOptions.SyncWrites && pFP->GetDstFileSize() > 0)
         {
             auto fsync_res = pFP->FsyncDst();
             if (!fsync_res)

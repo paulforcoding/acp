@@ -24,13 +24,13 @@ public:
     }
     ~AIOSlotMgr() override
     {
-        io_destroy(m_io_ctx);
+        io_destroy(mIoCtx);
     }
 
 private:
     // implement virtual functions from IOSlotMgr
     tl::expected<void, StackError> Init() override;
-    void prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
+    void DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
     void PrepareOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override;
@@ -42,5 +42,5 @@ private:
     tl::expected<void, StackError> ReapWrite(struct io_event *ev);
 
 private:
-    io_context_t m_io_ctx = 0;
+    io_context_t mIoCtx = 0;
 };

@@ -5,7 +5,7 @@
 
 tl::expected<void, StackError> UIOSlotMgr::Init()
 {
-    int ret = io_uring_queue_init(static_cast<int>(mRWSlots.size() + mCksumSlots.size()), &m_ring, 0);
+    int ret = io_uring_queue_init(static_cast<int>(mRWSlots.size() + mCksumSlots.size()), &mRing, 0);
     if (ret < 0)
     {
         return tl::unexpected(StackError(fmt::format("io_uring_queue_init() failed, errno: {}", -ret)));
@@ -13,9 +13,9 @@ tl::expected<void, StackError> UIOSlotMgr::Init()
     return {};
 }
 
-void UIOSlotMgr::prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
+void UIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
 {
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&m_ring);
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&mRing);
     io_uring_prep_read(sqe, fd, buf, ioSize, offset);
     io_uring_sqe_set_data(sqe, slot);
 }
@@ -25,11 +25,11 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
 #ifndef NDEBUG
     // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_uring_submit(&m_ring);
+    int ret = io_uring_submit(&mRing);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_submit(read)", start, end);
 #else
-    int ret = io_uring_submit(&m_ring);
+    int ret = io_uring_submit(&mRing);
 #endif
 
     if (ret < 0)
@@ -47,13 +47,13 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
 
 void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
-    struct io_uring_sqe *sqe = io_uring_get_sqe(&m_ring);
+    struct io_uring_sqe *sqe = io_uring_get_sqe(&mRing);
     auto currCPFPIt = slot->GetCPFPPtr();
 
     auto [offset, ioSize] = slot->GetIOInfo();
-    if (m_options.DirectIO)
+    if (mOptions.DirectIO)
     {
-        ioSize = m_options.IoSize;
+        ioSize = mOptions.IoSize;
     }
     io_uring_prep_write(sqe, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize, offset);
     mLogger->debug("Preparing write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
@@ -69,11 +69,11 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneWrite(IOSlot *slot)
 #ifndef NDEBUG
     // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_uring_submit(&m_ring);
+    int ret = io_uring_submit(&mRing);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_submit(write)", start, end);
 #else
-    int ret = io_uring_submit(&m_ring);
+    int ret = io_uring_submit(&mRing);
 #endif
 
     if (ret < 0)
@@ -114,7 +114,7 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
     {
         mLogger->trace("Waiting for completion events to reap...");
         struct io_uring_cqe *cqe = nullptr;
-        int ret = io_uring_peek_cqe(&m_ring, &cqe);
+        int ret = io_uring_peek_cqe(&mRing, &cqe);
         if (ret == -EAGAIN || cqe == nullptr)
         {
             mLogger->trace("No more completion events to reap.");
@@ -132,7 +132,7 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
             auto reap_res = ReapRead(slot, cqe);
             if (!reap_res)
             {
-                io_uring_cqe_seen(&m_ring, cqe);
+                io_uring_cqe_seen(&mRing, cqe);
                 return tl::unexpected(reap_res.error());
             }
         }
@@ -142,12 +142,12 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
             auto reap_res = ReapWrite(slot, cqe);
             if (!reap_res)
             {
-                io_uring_cqe_seen(&m_ring, cqe);
+                io_uring_cqe_seen(&mRing, cqe);
                 return tl::unexpected(reap_res.error());
             }
         }
 
-        io_uring_cqe_seen(&m_ring, cqe);
+        io_uring_cqe_seen(&mRing, cqe);
     }
 
     return {};

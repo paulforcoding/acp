@@ -20,12 +20,12 @@ public:
     }
     ~UIOSlotMgr() override
     {
-        io_uring_queue_exit(&m_ring);
+        io_uring_queue_exit(&mRing);
     }
 
 private:
     tl::expected<void, StackError> Init() override;
-    void prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
+    void DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
     void PrepareOneWrite(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override;
     tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override;
@@ -34,5 +34,5 @@ private:
     tl::expected<void, StackError> ReapWrite(IOSlot *slot, io_uring_cqe *cqe);
 
 private:
-    struct io_uring m_ring;
+    struct io_uring mRing;
 };

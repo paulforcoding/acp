@@ -30,7 +30,7 @@ struct ILogger
     virtual ~ILogger() = default;
 
     // 设置/获取级别
-    void set_level(Level l) noexcept { level_.store(static_cast<int>(l)); }
+    void set_level(Level l) noexcept { mLevel.store(static_cast<int>(l)); }
     void set_level(std::string_view level_str) noexcept
     {
         std::transform(level_str.begin(), level_str.end(), std::string().begin(), ::tolower);
@@ -47,9 +47,9 @@ struct ILogger
         else if (level_str == "fatal")
             set_level(Level::Fatal);
     }
-    Level level() const noexcept { return static_cast<Level>(level_.load()); }
+    Level level() const noexcept { return static_cast<Level>(mLevel.load()); }
 
-    bool enabled(Level l) const noexcept { return static_cast<int>(l) >= level_.load(); }
+    bool enabled(Level l) const noexcept { return static_cast<int>(l) >= mLevel.load(); }
 
     // 模板包装器：先检查级别，只有在启用时才进行格式化（避免不必要开销）
     template <typename... Args>
@@ -79,7 +79,7 @@ protected:
     virtual void log_impl(Level lvl, const std::string &msg) = 0;
 
 private:
-    std::atomic<int> level_{static_cast<int>(Level::Info)};
+    std::atomic<int> mLevel{static_cast<int>(Level::Info)};
 };
 
 // 控制台实现
@@ -117,37 +117,37 @@ struct ConsoleLogger : ILogger
 struct SpdLogger : ILogger
 {
     explicit SpdLogger(std::shared_ptr<spdlog::logger> lg)
-        : lg_(std::move(lg))
+        : mLg(std::move(lg))
     {
     }
 
     void log_impl(Level lvl, const std::string &msg) override
     {
-        if (!lg_)
+        if (!mLg)
             return;
         switch (lvl)
         {
         case Level::Trace:
-            lg_->trace(msg);
+            mLg->trace(msg);
             break;
         case Level::Debug:
-            lg_->debug(msg);
+            mLg->debug(msg);
             break;
         case Level::Info:
-            lg_->info(msg);
+            mLg->info(msg);
             break;
         case Level::Warn:
-            lg_->warn(msg);
+            mLg->warn(msg);
             break;
         case Level::Error:
-            lg_->error(msg);
+            mLg->error(msg);
             break;
         case Level::Fatal:
-            lg_->critical(msg);
+            mLg->critical(msg);
             break;
         }
     }
 
 private:
-    std::shared_ptr<spdlog::logger> lg_;
+    std::shared_ptr<spdlog::logger> mLg;
 };

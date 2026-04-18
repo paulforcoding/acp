@@ -64,49 +64,49 @@ public:
                std::shared_ptr<ILogger> logger); // full path expected
     ~CPFilePair()
     {
-        if (m_src_fd >= 0)
+        if (mSrcFd >= 0)
         {
-            mLogger->trace("Closing source file descriptor: {}, src: {}", m_src_fd, m_src_path);
-            close(m_src_fd);
-            m_src_fd = -1;
+            mLogger->trace("Closing source file descriptor: {}, src: {}", mSrcFd, mSrcPath);
+            close(mSrcFd);
+            mSrcFd = -1;
         }
-        if (m_dst_fd >= 0)
+        if (mDstFd >= 0)
         {
-            mLogger->trace("Closing destination file descriptor: {}, dst: {}", m_dst_fd, m_dst_path);
-            close(m_dst_fd);
-            m_dst_fd = -1;
+            mLogger->trace("Closing destination file descriptor: {}, dst: {}", mDstFd, mDstPath);
+            close(mDstFd);
+            mDstFd = -1;
         }
     }
     tl::expected<void, StackError> CheckAndInit();
-    tl::expected<void, StackError> TrucateDstToSrcSize()
+    tl::expected<void, StackError> TruncateDstToSrcSize()
     {
-        if (ftruncate(m_dst_fd, m_src_stat.st_size) < 0)
+        if (ftruncate(mDstFd, mSrcStat.st_size) < 0)
         {
             return tl::unexpected(StackError(
-                fmt::format("Failed to truncate destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
+                fmt::format("Failed to truncate destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
         }
         return {};
     }
     tl::expected<void, StackError> FsyncDst()
     {
-        mLogger->trace("Fsyncing destination file: {}", m_dst_path);
-        if (fsync(m_dst_fd) < 0)
+        mLogger->trace("Fsyncing destination file: {}", mDstPath);
+        if (fsync(mDstFd) < 0)
         {
             return tl::unexpected(StackError(
-                fmt::format("Failed to fsync destination file: {}, errno: {}, errstr: {}", m_dst_path, errno, strerror(errno))));
+                fmt::format("Failed to fsync destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
         }
         return {};
     }
 
-    int GetSrcFd() const { return m_src_fd; }
-    int GetDstFd() const { return m_dst_fd; }
-    size_t GetSrcFileSize() const { return static_cast<size_t>(m_src_stat.st_size); }
-    size_t GetDstFileSize() const { return static_cast<size_t>(m_dst_stat.st_size); } // not used yet
-    std::string GetSrcPath() const { return m_src_path; }
-    std::string GetDstPath() const { return m_dst_path; }
+    int GetSrcFd() const { return mSrcFd; }
+    int GetDstFd() const { return mDstFd; }
+    size_t GetSrcFileSize() const { return static_cast<size_t>(mSrcStat.st_size); }
+    size_t GetDstFileSize() const { return static_cast<size_t>(mDstStat.st_size); } // not used yet
+    std::string GetSrcPath() const { return mSrcPath; }
+    std::string GetDstPath() const { return mDstPath; }
     tl::expected<void, std::string> DoDstState();
-    struct stat *GetSrcStatPtr() { return &m_src_stat; } // not used yet
-    struct stat *GetDstStatPtr() { return &m_dst_stat; } // not used yet
+    struct stat *GetSrcStatPtr() { return &mSrcStat; } // not used yet
+    struct stat *GetDstStatPtr() { return &mDstStat; } // not used yet
     size_t GetReadOffset() const { return mReadBytes; }
     size_t GetWriteOffset() const { return mWrittenBytes; }
     void UpdatePrepareReadBytes(size_t n) { mReadBytes += n; }
@@ -115,12 +115,12 @@ public:
     bool IsWriteFinished() const
     {
         mLogger->debug("Checking IsWriteFinished: written_bytes: {}, src_file_size: {}, src: {}",
-                       mWrittenBytes, GetSrcFileSize(), m_src_path);
+                       mWrittenBytes, GetSrcFileSize(), mSrcPath);
         return mWrittenBytes >= GetSrcFileSize();
     }
     void SetReadFinished() { mReadBytes = GetSrcFileSize(); }
     void SetWriteFinished() { mWrittenBytes = GetSrcFileSize(); }
-    bool IsInitialized() const { return (m_src_fd >= 0 && m_dst_fd >= 0) || IsDir(); }
+    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir(); }
     bool IsDir() const { return mIsDir; }
     bool IsSymlink() const { return mIsSymlink; }
 
@@ -128,12 +128,12 @@ public:
     bool GetCksumError() const { return mIsChksumError; }
 
 private:
-    int m_src_fd = -1;
-    int m_dst_fd = -1;
-    struct stat m_src_stat;
-    struct stat m_dst_stat;
-    std::string m_src_path; // full path of source file
-    std::string m_dst_path; // full path of destination file
+    int mSrcFd = -1;
+    int mDstFd = -1;
+    struct stat mSrcStat;
+    struct stat mDstStat;
+    std::string mSrcPath; // full path of source file
+    std::string mDstPath; // full path of destination file
 
     size_t mReadBytes = 0;
     size_t mWrittenBytes = 0;
@@ -156,7 +156,7 @@ public:
     // make sure at lease we got one elem in mFilePairs
     CPFilePairMgr(const RWCombinedCopyOptions &options,
                   std::shared_ptr<ILogger> logger)
-        : m_options(options), mLogger(logger)
+        : mOptions(options), mLogger(logger)
     {
         mReadPtr = mFilePairs.begin();
     }
@@ -167,10 +167,10 @@ public:
         mFilePairs.push_back(
             std::make_shared<CPFilePair>(src_path,
                                          dst_path,
-                                         m_options.IoSize,
-                                         m_options.DirectIO,
-                                         m_options.SyncWrites,
-                                         (m_options.CopyMode == "CksumCopy" || m_options.CopyMode == "CksumOnly"),
+                                         mOptions.IoSize,
+                                         mOptions.DirectIO,
+                                         mOptions.SyncWrites,
+                                         (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
                                          mLogger));
         if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
         {
@@ -260,7 +260,7 @@ private:
     std::list<std::shared_ptr<CPFilePair>> mFilePairs;
     DedupList<CPFilePair> mInflightFPs;
 
-    RWCombinedCopyOptions m_options;
+    RWCombinedCopyOptions mOptions;
     std::mutex mMutex; // to protect mFilePairs, mReadPtr, mWritePtr in multithreaded scenarios
     std::list<std::shared_ptr<CPFilePair>>::iterator mReadPtr;
 
@@ -310,14 +310,14 @@ public:
     }
     // ctor
     IOSlot(size_t buf_size, int id, std::string_view ty)
-        : m_buf{AllocBytes(SECTORSIZE, buf_size)},
-          m_status{Status::Init},
-          m_id{id},
+        : mBuf{AllocBytes(SECTORSIZE, buf_size)},
+          mStatus{Status::Init},
+          mId{id},
           mType{ty}
     {
     }
     // dtor
-    virtual ~IOSlot() { FreeBytes(m_buf); }
+    virtual ~IOSlot() { FreeBytes(mBuf); }
 
     // disable copy and move to avoid accidental double-free or ownership transfer
     IOSlot(const IOSlot &) = delete;
@@ -327,17 +327,17 @@ public:
 
     virtual void Reset()
     {
-        m_status = Status::Init;
-        // bzero(m_buf, SECTORSIZE);
-        m_user_data = {};
+        mStatus = Status::Init;
+        // bzero(mBuf, SECTORSIZE);
+        mUserData = {};
         // clear IO tracking
         mIOInfo = IOInfo{};
     }
 
-    char *GetBuf() const { return m_buf; }
-    Status GetStatus() const { return m_status; }
-    int GetID() const { return m_id; }
-    void SetStatus(Status s) { m_status = s; }
+    char *GetBuf() const { return mBuf; }
+    Status GetStatus() const { return mStatus; }
+    int GetID() const { return mId; }
+    void SetStatus(Status s) { mStatus = s; }
 
     // IOInfo fields, used by ucp, in future may be used by acp
     struct IOInfo
@@ -357,23 +357,23 @@ public:
     }
 
     // getters for iocb, used by acp
-    struct iocb *GetReadIOCB() { return &m_iocb_read; }
-    struct iocb *GetWriteIOCB() { return &m_iocb_write; }
+    struct iocb *GetReadIOCB() { return &mIocbRead; }
+    struct iocb *GetWriteIOCB() { return &mIocbWrite; }
 
     struct iocb *InitReadIOCB()
     {
-        bzero(&m_iocb_read, sizeof(struct iocb));
-        return &m_iocb_read;
+        bzero(&mIocbRead, sizeof(struct iocb));
+        return &mIocbRead;
     }
     struct iocb *InitWriteIOCB()
     {
-        bzero(&m_iocb_write, sizeof(struct iocb));
-        return &m_iocb_write;
+        bzero(&mIocbWrite, sizeof(struct iocb));
+        return &mIocbWrite;
     }
 
     // UserData field, not used yet
-    const std::any &GetUserData() const { return m_user_data; }    // not used yet
-    void SetUserData(const std::any &data) { m_user_data = data; } // not used yet
+    const std::any &GetUserData() const { return mUserData; }    // not used yet
+    void SetUserData(const std::any &data) { mUserData = data; } // not used yet
 
     std::shared_ptr<CPFilePair> GetCPFPPtr() { return mCPFPIt; }
     std::shared_ptr<CPFilePair> GetCPFPPtr() const { return mCPFPIt; }
@@ -386,16 +386,16 @@ public:
 
 private:
     // data fields
-    char *m_buf = nullptr;
-    Status m_status = Status::Init;
-    int m_id = -1;        // its id, also index in IOSlotMgr's m_slots
-    std::any m_user_data; // user data field
+    char *mBuf = nullptr;
+    Status mStatus = Status::Init;
+    int mId = -1;        // its id, also index in IOSlotMgr's m_slots
+    std::any mUserData; // user data field
     std::shared_ptr<CPFilePair> mCPFPIt;
 
     IOInfo mIOInfo;
 
-    struct iocb m_iocb_read;  // 读iocb
-    struct iocb m_iocb_write; // 写iocb
+    struct iocb mIocbRead;  // 读iocb
+    struct iocb mIocbWrite; // 写iocb
 
     std::string mType;
     IOSlot *mAssociatedSlot = nullptr;
@@ -409,7 +409,7 @@ public:
     IOSlotMgr(const RWCombinedCopyOptions &options,
               CPFilePairMgr *file_pair_mgr,
               std::shared_ptr<ILogger> logger)
-        : m_options(options), mCPFPMgr(file_pair_mgr), mLogger(logger)
+        : mOptions(options), mCPFPMgr(file_pair_mgr), mLogger(logger)
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
@@ -583,7 +583,7 @@ public:
                 return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
             }
 
-            if (m_options.CopyMode != "CksumOnly")
+            if (mOptions.CopyMode != "CksumOnly")
             {
                 auto write_res = SubmitWrites();
                 if (!write_res)
@@ -603,7 +603,7 @@ public:
 
     void SetFuncDurationStat(std::shared_ptr<FuncDurationStat> stat)
     {
-        m_func_duration_stat = stat;
+        mFuncDurationStat = stat;
     }
 
 protected:
@@ -621,7 +621,7 @@ protected:
             }
         }
 
-        if (isStuck && !mCPFPMgr->ShouldStopCopy() && !m_options.EnableInotify)
+        if (isStuck && !mCPFPMgr->ShouldStopCopy() && !mOptions.EnableInotify)
         {
             mLogger->warn("Detected stuck AIO operations.");
             return tl::unexpected(StackError("Detected stuck AIO operations."));
@@ -680,7 +680,7 @@ protected:
 
                 size_t offset = nextIO->GetReadOffset();
                 PrepareOneRead(slot, offset, nextIO);
-                if (m_options.CopyMode == "CksumCopy" || m_options.CopyMode == "CksumOnly")
+                if (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly")
                 {
                     mCksumQueue.push(slot);
                 }
@@ -746,7 +746,7 @@ protected:
 
     void PrepareOneRead(IOSlot *slot, off_t offset, std::shared_ptr<CPFilePair> currCPFPIt)
     {
-        auto io_size = m_options.IoSize;
+        auto io_size = mOptions.IoSize;
         slot->SetCPFPPtr(currCPFPIt);
         slot->SetIOInfo(offset, io_size);
 
@@ -756,7 +756,7 @@ protected:
 
         if (slot->GetType() == "rw")
         {
-            prepareOneRead(slot,
+            DoPrepareOneRead(slot,
                            currCPFPIt->GetSrcFd(),
                            slot->GetBuf(),
                            io_size,
@@ -765,7 +765,7 @@ protected:
         }
         else
         {
-            prepareOneRead(slot,
+            DoPrepareOneRead(slot,
                            currCPFPIt->GetDstFd(),
                            slot->GetBuf(),
                            io_size,
@@ -876,9 +876,9 @@ protected:
             mLogger->warn("Function {} took too long: {} ms", func_name, duration);
         }
 
-        if (m_func_duration_stat)
+        if (mFuncDurationStat)
         {
-            m_func_duration_stat->AddDuration(func_name, duration);
+            mFuncDurationStat->AddDuration(func_name, duration);
         }
     }
     tl::expected<void, StackError> CheckOneCompleted(SlotType *slot)
@@ -919,8 +919,8 @@ protected:
             return false;
         }
 
-        std::string cksum1 = mDigest->Do(buf1, m_options.IoSize);
-        std::string cksum2 = mDigest->Do(buf2, m_options.IoSize);
+        std::string cksum1 = mDigest->Do(buf1, mOptions.IoSize);
+        std::string cksum2 = mDigest->Do(buf2, mOptions.IoSize);
         return cksum1 == cksum2;
     }
 
@@ -972,12 +972,12 @@ protected:
 
         slot->SetIOInfo(offset, static_cast<size_t>(io_ret));
 
-        if (m_options.CopyMode == "CopyOnly")
+        if (mOptions.CopyMode == "CopyOnly")
         {
             // prepare write io using the actual bytes read
             PrepareOneWrite(slot);
         }
-        else if (m_options.CopyMode == "CksumCopy")
+        else if (mOptions.CopyMode == "CksumCopy")
         {
             if (bothSlotsReadReaped(slot, slot->GetAssociatedSlot()))
             {
@@ -1097,7 +1097,7 @@ protected:
 
 private:
     virtual tl::expected<void, StackError> Init() = 0;
-    virtual void prepareOneRead(SlotType *slot, int fd, void *buf, size_t ioSize, off_t offset) = 0;
+    virtual void DoPrepareOneRead(SlotType *slot, int fd, void *buf, size_t ioSize, off_t offset) = 0;
     virtual void PrepareOneWrite(SlotType *slot) = 0;
     virtual tl::expected<void, StackError> SubmitOneRead(SlotType *slot) = 0;
     virtual tl::expected<void, StackError> SubmitOneWrite(SlotType *slot) = 0;
@@ -1108,11 +1108,11 @@ protected:
     std::vector<std::unique_ptr<SlotType>> mCksumSlots;
     std::queue<SlotType *> mCksumQueue;
 
-    RWCombinedCopyOptions m_options;
+    RWCombinedCopyOptions mOptions;
     CPFilePairMgr *mCPFPMgr;
 
     std::shared_ptr<ILogger> mLogger;
-    std::shared_ptr<FuncDurationStat> m_func_duration_stat;
+    std::shared_ptr<FuncDurationStat> mFuncDurationStat;
 
     std::unique_ptr<Digest> mDigest;
     std::ofstream mCksumResultFile;

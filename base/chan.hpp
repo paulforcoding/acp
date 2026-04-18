@@ -11,15 +11,15 @@
 class CondVarGuard
 {
 public:
-    explicit CondVarGuard(std::condition_variable &cv) : m_cv(cv) {}
+    explicit CondVarGuard(std::condition_variable &cv) : mCv(cv) {}
 
     ~CondVarGuard()
     {
-        m_cv.notify_one();
+        mCv.notify_one();
     }
 
 private:
-    std::condition_variable &m_cv;
+    std::condition_variable &mCv;
 };
 
 template <typename ElemType>

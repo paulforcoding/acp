@@ -12,12 +12,12 @@ tl::expected<void, StackError> AIOSlotMgr::Init()
     {
         return tl::unexpected(StackError("io_setup() failed, errno: " + std::to_string(-ret)));
     }
-    m_io_ctx = ctx;
+    mIoCtx = ctx;
 
     return {};
 }
 
-void AIOSlotMgr::prepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
+void AIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
 {
     auto iocb{slot->InitReadIOCB()};
     io_prep_pread(iocb, fd, buf, ioSize, offset);
@@ -39,11 +39,11 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
 #ifndef NDEBUG
     // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_submit(m_io_ctx, 1, iocbs);
+    int ret = io_submit(mIoCtx, 1, iocbs);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_submit(read)", start, end);
 #else
-    int ret = io_submit(m_io_ctx, 1, iocbs);
+    int ret = io_submit(mIoCtx, 1, iocbs);
 #endif
     if (ret < 0)
     {
@@ -70,9 +70,9 @@ void AIOSlotMgr::PrepareOneWrite(IOSlot *slot)
     auto currCPFPIt = slot->GetCPFPPtr();
 
     auto [offset, ioSize] = slot->GetIOInfo();
-    if (m_options.DirectIO)
+    if (mOptions.DirectIO)
     {
-        ioSize = m_options.IoSize;
+        ioSize = mOptions.IoSize;
     }
     io_prep_pwrite(iocb, currCPFPIt->GetDstFd(), slot->GetBuf(), ioSize,
                    offset);
@@ -101,11 +101,11 @@ tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
 #ifndef NDEBUG
     // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_submit(m_io_ctx, 1, iocbs);
+    int ret = io_submit(mIoCtx, 1, iocbs);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_submit(write)", start, end); // warn if >100ms
 #else
-    int ret = io_submit(m_io_ctx, 1, iocbs);
+    int ret = io_submit(mIoCtx, 1, iocbs);
 #endif
     if (ret < 0)
     {
@@ -153,18 +153,18 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
     const int max_events = static_cast<int>(mRWSlots.size());
     struct io_event events[max_events];
     struct timespec timeout;
-    timeout.tv_sec = m_options.IOReapWait;
+    timeout.tv_sec = mOptions.IOReapWait;
     timeout.tv_nsec = 0;
 
 #ifndef NDEBUG
     // 打印io_getevents()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_getevents(m_io_ctx, 1, max_events, events,
+    int ret = io_getevents(mIoCtx, 1, max_events, events,
                            &timeout);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_getevents()", start, end); // warn if >10ms
 #else
-    int ret = io_getevents(m_io_ctx, 1, max_events, events, &timeout);
+    int ret = io_getevents(mIoCtx, 1, max_events, events, &timeout);
 #endif
     if (ret < 0)
     {

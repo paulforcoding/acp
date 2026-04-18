@@ -47,15 +47,15 @@ using format_string_t = fmt::format_string<Args...>;
 class StackError
 {
 public:
-    StackError(std::string_view msg, int code = 0) : m_code(code)
+    StackError(std::string_view msg, int code = 0) : mCode(code)
     {
-        m_stack.emplace_back(std::string(msg));
+        mStack.emplace_back(std::string(msg));
     }
 
     StackError(std::string_view msg, const StackError &prev, int code = 0)
-        : m_stack(prev.m_stack), m_code(code ? code : prev.m_code)
+        : mStack(prev.mStack), mCode(code ? code : prev.mCode)
     {
-        m_stack.emplace_back(std::string(msg));
+        mStack.emplace_back(std::string(msg));
     }
 
     // convenience static methods
@@ -75,38 +75,38 @@ public:
     void Append(format_string_t<Args...> fmt_str, Args &&...args)
     {
         auto msg = fmt::format(fmt_str, std::forward<Args>(args)...);
-        m_stack.emplace_back(msg);
-        m_full_msg.clear();
+        mStack.emplace_back(msg);
+        mFullMsg.clear();
     }
 
-    int Code() const noexcept { return m_code; }
+    int Code() const noexcept { return mCode; }
 
     const char *ToString() const noexcept
     {
-        if (m_full_msg.empty())
+        if (mFullMsg.empty())
         {
             // build from top -> bottom for readability
-            for (auto it = m_stack.rbegin(); it != m_stack.rend(); ++it)
+            for (auto it = mStack.rbegin(); it != mStack.rend(); ++it)
             {
-                if (it == m_stack.rbegin())
-                    m_full_msg += *it;
+                if (it == mStack.rbegin())
+                    mFullMsg += *it;
                 else
-                    m_full_msg += std::string("  caused by: ") + *it;
-                m_full_msg += '\n';
+                    mFullMsg += std::string("  caused by: ") + *it;
+                mFullMsg += '\n';
             }
         }
-        return m_full_msg.c_str();
+        return mFullMsg.c_str();
     }
 
     bool operator==(const StackError &other) const
     {
-        return m_code == other.m_code && m_stack == other.m_stack;
+        return mCode == other.mCode && mStack == other.mStack;
     }
 
 private:
-    std::vector<std::string> m_stack;
-    int m_code = 0;                 // lastest error code, 0 if not applicable
-    mutable std::string m_full_msg; // cached what() result
+    std::vector<std::string> mStack;
+    int mCode = 0;                 // lastest error code, 0 if not applicable
+    mutable std::string mFullMsg; // cached what() result
 };
 
 inline tl::unexpected<StackError> Unexpt(const StackError &se)
@@ -127,8 +127,8 @@ public:
     // duration in ms
     void AddDuration(std::string_view func_name, int64_t duration)
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_stats[std::string(func_name)].push_back(duration);
+        std::lock_guard<std::mutex> lock(mMutex);
+        mStats[std::string(func_name)].push_back(duration);
     };
     void AddDuration(std::string_view func_name, std::chrono::_V2::system_clock::time_point start,
                      std::chrono::_V2::system_clock::time_point end)
@@ -138,9 +138,9 @@ public:
     };
     void PrintStats()
     {
-        std::lock_guard<std::mutex> lock(m_mutex);
+        std::lock_guard<std::mutex> lock(mMutex);
         mLogger->info("Function Duration Statistics:");
-        for (const auto &pair : m_stats)
+        for (const auto &pair : mStats)
         {
             const std::string &func_name = pair.first;
             const std::list<int64_t> &durations = pair.second;
@@ -171,7 +171,7 @@ public:
 
 private:
     // key: function name, value: list of durations (unit in user-defined, e.g., microseconds)
-    std::unordered_map<std::string, std::list<int64_t>> m_stats;
-    std::mutex m_mutex;
+    std::unordered_map<std::string, std::list<int64_t>> mStats;
+    std::mutex mMutex;
     std::shared_ptr<ILogger> mLogger;
 };
