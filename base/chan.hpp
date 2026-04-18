@@ -65,7 +65,7 @@ public:
             auto item = std::move(mQueue.front());
             mQueue.pop();
             assert(item != nullptr);
-            return std::move(item);
+            return item;
         }
         else if (IsClosed())
         {

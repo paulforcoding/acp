@@ -183,7 +183,7 @@ public:
 
     tl::expected<std::shared_ptr<CPFilePair>, StackError> GetNextReadIO();
     tl::expected<void, StackError> CheckWriteComplete(std::shared_ptr<CPFilePair> writeIt);
-    void CheckReadComplete(std::shared_ptr<CPFilePair> pFP);
+    tl::expected<void, StackError> CheckReadComplete(std::shared_ptr<CPFilePair> pFP);
 
     void SetStopFlag()
     {
@@ -236,7 +236,7 @@ public:
     }
 
 private:
-    bool CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP);
+    tl::expected<bool, StackError> CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP);
     void ReadPtrAdvance(std::shared_ptr<CPFilePair> pFP)
     {
         assert(pFP == *mReadPtr);
@@ -776,7 +776,11 @@ protected:
 
         if (slot->GetType() == "rw")
         {
-            mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
+            auto check_res = mCPFPMgr->CheckReadComplete(slot->GetCPFPPtr());
+            if (!check_res)
+            {
+                mLogger->error("CheckReadComplete failed in PrepareOneRead: {}", check_res.error().ToString());
+            }
         }
     }
 
@@ -1013,7 +1017,11 @@ protected:
                                    offset,
                                    slot->GetCPFPPtr()->GetSrcPath(),
                                    slot->GetCPFPPtr()->GetDstPath());
-                    HandleWriteCompletion(ioSlot, ioSlot->GetIOInfo().io_size);
+                    auto write_res = HandleWriteCompletion(ioSlot, ioSlot->GetIOInfo().io_size);
+                    if (!write_res)
+                    {
+                        return tl::unexpected(StackError("HandleWriteCompletion() after cksum match, err: ", write_res.error()));
+                    }
                 }
             }
         }
@@ -1042,7 +1050,11 @@ protected:
                 }
 
                 // cksum normally done, act like we've done the write
-                HandleWriteCompletion(ioSlot, ioSlot->GetIOInfo().io_size);
+                auto write_res = HandleWriteCompletion(ioSlot, ioSlot->GetIOInfo().io_size);
+                if (!write_res)
+                {
+                    return tl::unexpected(StackError("HandleWriteCompletion() after CksumOnly, err: ", write_res.error()));
+                }
             }
         }
 

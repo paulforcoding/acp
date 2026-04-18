@@ -214,7 +214,12 @@ AGAIN:
         goto AGAIN;
     }
 
-    if (CheckReadCompleteNoLock(*mReadPtr))
+    auto read_complete_res = CheckReadCompleteNoLock(*mReadPtr);
+    if (!read_complete_res)
+    {
+        return tl::unexpected(read_complete_res.error());
+    }
+    if (read_complete_res.value())
     {
         goto AGAIN;
     }
@@ -223,13 +228,18 @@ AGAIN:
     return *mReadPtr;
 }
 
-void CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
+tl::expected<void, StackError> CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    CheckReadCompleteNoLock(pFP);
+    auto res = CheckReadCompleteNoLock(pFP);
+    if (!res)
+    {
+        return tl::unexpected(res.error());
+    }
+    return {};
 }
 
-bool CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
+tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
 {
     mLogger->trace("CheckReadCompleteNoLock(): src: {}, dst: {}, preparedReadBytes: {}, totalBytes: {}, IsReadFinished: {}",
                    pFP->GetSrcPath(), pFP->GetDstPath(),
@@ -244,7 +254,11 @@ bool CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
         {
             mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
                            (pFP)->GetSrcPath(), (pFP)->GetDstPath());
-            CheckWriteComplete(pFP); // directly check write complete for 0-size files
+            auto write_res = CheckWriteComplete(pFP);
+            if (!write_res)
+            {
+                return tl::unexpected(StackError("CheckWriteComplete() for 0-size file, err: ", write_res.error()));
+            }
         }
 
         ReadPtrAdvance(pFP);
