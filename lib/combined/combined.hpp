@@ -197,7 +197,6 @@ public:
         std::lock_guard<std::mutex> lock(mMutex);
         auto should = (mStopFlag.load() &&
                        mReadPtr == mFilePairs.end() &&
-                       mStartFlag.load() &&
                        mFilePairs.empty() &&
                        mInflightFPs.Empty());
         if (!should)
