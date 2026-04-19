@@ -81,7 +81,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     {
         // std::filesystem::file_type is not directly formattable by fmt, cast to int for diagnostic
         return tl::unexpected(StackError(
-            fmt::format("src: {} is not supported file type: {}", mSrcPath, static_cast<int>(fs::status(mSrcPath).type()))));
+            fmt::format("src: {} is not supported file type: {}", mSrcPath, static_cast<int>(fs::status(mSrcPath).type())), ENOTSUP));
     }
 
     // check source file
@@ -177,8 +177,8 @@ AGAIN:
         auto init_res = (*mReadPtr)->CheckAndInit();
         if (!init_res)
         {
-            // 检查如果报错含有“not supported”字样，就简单跳过这次copy，取下一个mReadPtr即可
-            if (std::string(init_res.error().ToString()).find("not supported") != std::string::npos)
+            // 不支持的文件类型，简单跳过
+            if (init_res.error().Code() == ENOTSUP)
             {
                 mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
                               (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().ToString());

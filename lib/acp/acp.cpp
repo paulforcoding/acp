@@ -151,7 +151,7 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
 tl::expected<void, StackError> AIOSlotMgr::IOReap()
 {
     const int max_events = static_cast<int>(mRWSlots.size());
-    struct io_event events[max_events];
+    std::vector<struct io_event> events(max_events);
     struct timespec timeout;
     timeout.tv_sec = mOptions.IOReapWait;
     timeout.tv_nsec = 0;
@@ -159,12 +159,12 @@ tl::expected<void, StackError> AIOSlotMgr::IOReap()
 #ifndef NDEBUG
     // 打印io_getevents()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_getevents(mIoCtx, 1, max_events, events,
+    int ret = io_getevents(mIoCtx, 1, max_events, events.data(),
                            &timeout);
     auto end = std::chrono::high_resolution_clock::now();
     AddDuration("io_getevents()", start, end); // warn if >10ms
 #else
-    int ret = io_getevents(mIoCtx, 1, max_events, events, &timeout);
+    int ret = io_getevents(mIoCtx, 1, max_events, events.data(), &timeout);
 #endif
     if (ret < 0)
     {

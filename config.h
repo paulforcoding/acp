@@ -14,4 +14,3 @@
 /* liburing support (optional) */
 #define HAVE_LIBURING 1
 
-#endif

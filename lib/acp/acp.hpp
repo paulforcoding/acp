@@ -24,7 +24,10 @@ public:
     }
     ~AIOSlotMgr() override
     {
-        io_destroy(mIoCtx);
+        if (mIoCtx != 0)
+        {
+            io_destroy(mIoCtx);
+        }
     }
 
 private:

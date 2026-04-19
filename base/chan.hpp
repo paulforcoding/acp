@@ -29,7 +29,7 @@ protected:
     static constexpr int CHANNEL_SIZE_DEFAULT = 1;
     static constexpr int MICRO_SLEEP_TIME = 1; // ms
 
-    std::mutex mMutex;
+    mutable std::mutex mMutex;
     std::condition_variable mCondVar;
     std::queue<std::unique_ptr<ElemType>> mQueue;
 
@@ -42,6 +42,7 @@ public:
 
     int Size() const
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         return mQueue.size();
     }
     bool IsClosed() const
@@ -103,7 +104,7 @@ class InotifyChannel
 protected:
     static constexpr int MICRO_SLEEP_TIME = 1000; // ms
 
-    std::mutex mMutex;
+    mutable std::mutex mMutex;
     std::condition_variable mCondVar;
     std::deque<std::string> mQueue;
     std::unordered_set<std::string> mQueueIdx; // for deduplication
@@ -116,6 +117,7 @@ public:
 
     int Size() const
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         return mQueue.size();
     }
     bool IsClosed() const
@@ -177,6 +179,7 @@ template <typename ElemType>
 class DedupList
 {
 protected:
+    mutable std::mutex mMutex;
     std::list<std::shared_ptr<ElemType>> mList;
     std::unordered_set<std::string> mQueueIdx; // for deduplication
 
@@ -185,16 +188,19 @@ public:
 
     int Size() const
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         return mList.size();
     }
     bool Empty() const
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         return mList.empty();
     }
 
     // Push with deduplication, ignore queue size limit, and won't block
     void Push(std::shared_ptr<ElemType> &item, std::string_view key)
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         // deduplication check, using unordered_set for O(1) lookup
         if (mQueueIdx.find(std::string(key)) != mQueueIdx.end())
         {
@@ -208,6 +214,7 @@ public:
 
     void Remove(std::shared_ptr<ElemType> &item, std::string_view key)
     {
+        std::lock_guard<std::mutex> lock(mMutex);
         mQueueIdx.erase(std::string(key));
         mList.remove(item);
     }

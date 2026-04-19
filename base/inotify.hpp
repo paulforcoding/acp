@@ -39,7 +39,7 @@ public:
         int wd = inotify_add_watch(mFD, path.c_str(), mMask);
         if (wd < 0)
         {
-            throw StackError(fmt::format("inotify_add_watch failed for path {}", path));
+            return tl::unexpected(StackError(fmt::format("inotify_add_watch failed for path {}", path)));
         }
         // begin recursive add
         for (const auto &entry : fs::recursive_directory_iterator(path))
@@ -49,8 +49,8 @@ public:
                 int cwd = inotify_add_watch(mFD, entry.path().c_str(), mMask);
                 if (cwd < 0)
                 {
-                    throw StackError(
-                        fmt::format("inotify_add_watch failed for path {}", entry.path().string()));
+                    return tl::unexpected(StackError(
+                        fmt::format("inotify_add_watch failed for path {}", entry.path().string())));
                 }
             }
         }

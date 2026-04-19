@@ -66,13 +66,11 @@ public:
     {
         if (mSrcFd >= 0)
         {
-            mLogger->trace("Closing source file descriptor: {}, src: {}", mSrcFd, mSrcPath);
             close(mSrcFd);
             mSrcFd = -1;
         }
         if (mDstFd >= 0)
         {
-            mLogger->trace("Closing destination file descriptor: {}, dst: {}", mDstFd, mDstPath);
             close(mDstFd);
             mDstFd = -1;
         }
@@ -923,8 +921,8 @@ protected:
             return false;
         }
 
-        std::string cksum1 = mDigest->Do(buf1, mOptions.IoSize);
-        std::string cksum2 = mDigest->Do(buf2, mOptions.IoSize);
+        std::string cksum1 = mDigest->Do(buf1, size1);
+        std::string cksum2 = mDigest->Do(buf2, size2);
         return cksum1 == cksum2;
     }
 

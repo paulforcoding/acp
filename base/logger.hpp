@@ -33,18 +33,20 @@ struct ILogger
     void set_level(Level l) noexcept { mLevel.store(static_cast<int>(l)); }
     void set_level(std::string_view level_str) noexcept
     {
-        std::transform(level_str.begin(), level_str.end(), std::string().begin(), ::tolower);
-        if (level_str == "trace")
+        std::string lowered;
+        lowered.reserve(level_str.size());
+        std::transform(level_str.begin(), level_str.end(), std::back_inserter(lowered), ::tolower);
+        if (lowered == "trace")
             set_level(Level::Trace);
-        else if (level_str == "debug")
+        else if (lowered == "debug")
             set_level(Level::Debug);
-        else if (level_str == "info")
+        else if (lowered == "info")
             set_level(Level::Info);
-        else if (level_str == "warn" || level_str == "warning")
+        else if (lowered == "warn" || lowered == "warning")
             set_level(Level::Warn);
-        else if (level_str == "error")
+        else if (lowered == "error")
             set_level(Level::Error);
-        else if (level_str == "fatal")
+        else if (lowered == "fatal")
             set_level(Level::Fatal);
     }
     Level level() const noexcept { return static_cast<Level>(mLevel.load()); }

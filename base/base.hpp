@@ -50,12 +50,14 @@ public:
     StackError(std::string_view msg, int code = 0) : mCode(code)
     {
         mStack.emplace_back(std::string(msg));
+        BuildFullMsg();
     }
 
     StackError(std::string_view msg, const StackError &prev, int code = 0)
         : mStack(prev.mStack), mCode(code ? code : prev.mCode)
     {
         mStack.emplace_back(std::string(msg));
+        BuildFullMsg();
     }
 
     // convenience static methods
@@ -76,26 +78,28 @@ public:
     {
         auto msg = fmt::format(fmt_str, std::forward<Args>(args)...);
         mStack.emplace_back(msg);
-        mFullMsg.clear();
+        BuildFullMsg();
     }
 
     int Code() const noexcept { return mCode; }
 
     const char *ToString() const noexcept
     {
-        if (mFullMsg.empty())
-        {
-            // build from top -> bottom for readability
-            for (auto it = mStack.rbegin(); it != mStack.rend(); ++it)
-            {
-                if (it == mStack.rbegin())
-                    mFullMsg += *it;
-                else
-                    mFullMsg += std::string("  caused by: ") + *it;
-                mFullMsg += '\n';
-            }
-        }
         return mFullMsg.c_str();
+    }
+
+private:
+    void BuildFullMsg()
+    {
+        mFullMsg.clear();
+        for (auto it = mStack.rbegin(); it != mStack.rend(); ++it)
+        {
+            if (it == mStack.rbegin())
+                mFullMsg += *it;
+            else
+                mFullMsg += std::string("  caused by: ") + *it;
+            mFullMsg += '\n';
+        }
     }
 
     bool operator==(const StackError &other) const
@@ -106,7 +110,7 @@ public:
 private:
     std::vector<std::string> mStack;
     int mCode = 0;                 // lastest error code, 0 if not applicable
-    mutable std::string mFullMsg; // cached what() result
+    std::string mFullMsg; // cached what() result
 };
 
 inline tl::unexpected<StackError> Unexpt(const StackError &se)
@@ -130,8 +134,8 @@ public:
         std::lock_guard<std::mutex> lock(mMutex);
         mStats[std::string(func_name)].push_back(duration);
     };
-    void AddDuration(std::string_view func_name, std::chrono::_V2::system_clock::time_point start,
-                     std::chrono::_V2::system_clock::time_point end)
+    void AddDuration(std::string_view func_name, std::chrono::system_clock::time_point start,
+                     std::chrono::system_clock::time_point end)
     {
         auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
         AddDuration(func_name, duration);

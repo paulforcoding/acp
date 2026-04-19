@@ -57,14 +57,15 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 
     // start a thread to run CopyEngine
     std::thread file_copy_thread(
-        [&file_copier, &copyChannel, logger]()
-        { 
-    auto copy_res = file_copier->RunChannel(copyChannel); 
-    if (!copy_res)
-    {        
-        // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
-        logger->error("File copy failed: {}", copy_res.error().ToString());        
-    } });
+        [fc = std::move(file_copier), &copyChannel, logger]()
+        {
+            auto copy_res = fc->RunChannel(copyChannel);
+            if (!copy_res)
+            {
+                // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
+                logger->error("File copy failed: {}", copy_res.error().ToString());
+            }
+        });
 
     // create dst_dir if not exist
     if (!fs::exists(dst_p))
@@ -134,14 +135,15 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 
     // start a thread to run CopyEngine
     std::thread file_copy_thread(
-        [&file_copier, &copyChannel, logger]()
-        { 
-    auto copy_res = file_copier->RunChannel(copyChannel); 
-    if (!copy_res)
-    {        
-        // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
-        logger->error("File copy failed: {}", copy_res.error().ToString());        
-    } });
+        [fc = std::move(file_copier), &copyChannel, logger]()
+        {
+            auto copy_res = fc->RunChannel(copyChannel);
+            if (!copy_res)
+            {
+                // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
+                logger->error("File copy failed: {}", copy_res.error().ToString());
+            }
+        });
 
     auto copy_entry = std::make_unique<CopyEntry>();
     copy_entry->srcPath = src_file.string();
