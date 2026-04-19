@@ -4,7 +4,11 @@
 #include "lib/thirdparty/json.hpp"
 #include "base/base.hpp"
 #include "base/chan.hpp"
+#ifdef __APPLE__
+#include "base/fsevents.hpp"
+#else
 #include "base/inotify.hpp"
+#endif
 #include "base/logger.hpp"
 
 std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options);

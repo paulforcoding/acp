@@ -6,9 +6,9 @@
 CXX ?= g++
 CXXFLAGS ?= -g -std=c++20 -Wall -Wextra -I. -O2
 # Linker flags: async IO + crypto/hash libs
-LDFLAGS ?= -laio -luring -lcrypto -lssl -lxxhash
+LDFLAGS ?= -lcrypto -lssl -lxxhash
 
-SOURCES ?= main.cpp lib/mainlib.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp
+SOURCES ?= main.cpp lib/mainlib.cpp base/base.cpp lib/combined/combined.cpp
 OBJECTS = $(SOURCES:.cpp=.o)
 TARGET = acp
 
@@ -45,7 +45,7 @@ TEST_BIN := tests/test_all
 test: $(TEST_BIN)
 
 # Implementation objects required by tests (provide symbols used by test code)
-IMPLEMENTATION_OBJS := lib/combined/combined.o base/base.o lib/acp/acp.o lib/mainlib.o lib/ucp/ucp.o
+IMPLEMENTATION_OBJS := lib/combined/combined.o base/base.o lib/mainlib.o
 
 $(TEST_BIN): $(TEST_OBJS) $(CATCH_OBJ) $(IMPLEMENTATION_OBJS)
 	$(CXX) $(CXXFLAGS) -I. -Ilib/thirdparty/catch2 -o $@ $^ -pthread $(LDFLAGS)

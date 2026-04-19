@@ -16,8 +16,8 @@ CPFilePair::CPFilePair(std::string_view src_path,
       mCksum(cksum),
       mLogger(logger)
 {
-    bzero(&mSrcStat, sizeof(struct stat));
-    bzero(&mDstStat, sizeof(struct stat));
+    memset(&mSrcStat, 0, sizeof(struct stat));
+    memset(&mDstStat, 0, sizeof(struct stat));
 }
 
 tl::expected<void, StackError> CPFilePair::CheckAndInit()
@@ -86,11 +86,13 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     // check source file
     mLogger->trace("Opening source file: {}", mSrcPath);
+#ifdef O_DIRECT
     if (mDirectIO)
     {
         mSrcFd = open(mSrcPath.c_str(), O_RDONLY | O_DIRECT);
     }
     else
+#endif
     {
         mSrcFd = open(mSrcPath.c_str(), O_RDONLY);
     }
@@ -133,10 +135,12 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     {
         dstOpenFlags |= O_WRONLY | O_TRUNC;
     }
+#ifdef O_DIRECT
     if (mDirectIO)
     {
         dstOpenFlags |= O_DIRECT;
     }
+#endif
     mDstFd = open(mDstPath.c_str(), dstOpenFlags, 0644);
 
     if (mDstFd < 0)

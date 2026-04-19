@@ -12,7 +12,33 @@ NC='\033[0m' # No Color
 ENABLE_URING=0
 CXX=${CXX:-g++}
 CXXFLAGS=${CXXFLAGS:--g -std=c++20 -Wall -Wextra -O2}
-SOURCES="main.cpp lib/mainlib.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp"
+SOURCES="main.cpp lib/mainlib.cpp base/base.cpp lib/combined/combined.cpp"
+
+# Platform detection
+PLATFORM="linux"
+UNAME_S=$(uname -s)
+if [ "$UNAME_S" = "Darwin" ]; then
+    PLATFORM="macos"
+fi
+
+if [ "$PLATFORM" = "macos" ]; then
+    SOURCES="main.cpp lib/mainlib.cpp base/base.cpp lib/combined/combined.cpp"
+    # Auto-detect Homebrew prefix
+    HOMEBREW_PREFIX=""
+    if command -v brew &> /dev/null; then
+        HOMEBREW_PREFIX=$(brew --prefix)
+    elif [ -d /opt/homebrew ]; then
+        HOMEBREW_PREFIX=/opt/homebrew
+    elif [ -d /usr/local/Homebrew ]; then
+        HOMEBREW_PREFIX=/usr/local
+    fi
+    if [ -n "$HOMEBREW_PREFIX" ]; then
+        CXXFLAGS="$CXXFLAGS -I$HOMEBREW_PREFIX/include"
+        LDFLAGS="$LDFLAGS -L$HOMEBREW_PREFIX/lib"
+    fi
+else
+    SOURCES="main.cpp lib/mainlib.cpp lib/acp/acp.cpp base/base.cpp lib/combined/combined.cpp"
+fi
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -57,7 +83,7 @@ check_header() {
     local header=$1
     
     # Try to find header in common include paths
-    for path in /usr/include /usr/local/include /opt/local/include; do
+    for path in /usr/include /usr/local/include /opt/local/include /opt/homebrew/include; do
         if [ -f "$path/$header" ]; then
             return 0
         fi
@@ -83,7 +109,7 @@ int main() { return 0; }
 EOF
     
     if $CXX $CXXFLAGS -c /tmp/test_link.cpp -o /tmp/test_link.o 2>/dev/null && \
-       timeout 5 $CXX $CXXFLAGS -o /tmp/test_link /tmp/test_link.o $flag 2>/dev/null; then
+       timeout 5 $CXX $CXXFLAGS $LDFLAGS -o /tmp/test_link /tmp/test_link.o $flag 2>/dev/null; then
         rm -f /tmp/test_link.cpp /tmp/test_link.o /tmp/test_link
         echo -e "${GREEN}yes${NC}"
         return 0
@@ -100,22 +126,26 @@ echo ""
 # Check for required dependencies
 echo "Checking for required dependencies..."
 
-# Check libaio
-echo -n "Checking for libaio... "
-if check_header "libaio.h"; then
-    echo -e "${GREEN}found${NC}"
-else
-    echo -e "${RED}not found${NC}"
-    echo -e "${RED}ERROR: libaio is required but not found${NC}"
-    echo "Please install libaio development files:"
-    echo "  Ubuntu/Debian: sudo apt-get install libaio-dev"
-    echo "  CentOS/RHEL:   sudo yum install libaio-devel"
-    exit 1
-fi
+# Check libaio (Linux only)
+if [ "$PLATFORM" = "linux" ]; then
+    echo -n "Checking for libaio... "
+    if check_header "libaio.h"; then
+        echo -e "${GREEN}found${NC}"
+    else
+        echo -e "${RED}not found${NC}"
+        echo -e "${RED}ERROR: libaio is required but not found${NC}"
+        echo "Please install libaio development files:"
+        echo "  Ubuntu/Debian: sudo apt-get install libaio-dev"
+        echo "  CentOS/RHEL:   sudo yum install libaio-devel"
+        exit 1
+    fi
 
-if ! check_lib_link "libaio" "-laio"; then
-    echo -e "${RED}ERROR: Cannot link against libaio${NC}"
-    exit 1
+    if ! check_lib_link "libaio" "-laio"; then
+        echo -e "${RED}ERROR: Cannot link against libaio${NC}"
+        exit 1
+    fi
+else
+    echo "Skipping libaio check on macOS"
 fi
 
 # Check spdlog
@@ -161,6 +191,9 @@ fi
 # Generate config.h
 echo "Generating config.h..."
 
+# Generate config.h
+echo "Generating config.h..."
+
 cat > config.h << EOF
 /*
  * Auto-generated configuration header
@@ -169,8 +202,27 @@ cat > config.h << EOF
 
 #pragma once
 
-/* libaio support (required) */
-#define HAVE_LIBAIO 1
+/* Platform */
+EOF
+
+if [ "$PLATFORM" = "macos" ]; then
+    echo "#define PLATFORM_MACOS 1" >> config.h
+else
+    echo "#define PLATFORM_LINUX 1" >> config.h
+fi
+
+cat >> config.h << EOF
+
+/* libaio support (required on Linux) */
+EOF
+
+if [ "$PLATFORM" = "linux" ]; then
+    echo "#define HAVE_LIBAIO 1" >> config.h
+else
+    echo "/* #undef HAVE_LIBAIO */" >> config.h
+fi
+
+cat >> config.h << EOF
 
 /* spdlog support (required) */
 #define HAVE_SPDLOG 1
@@ -191,15 +243,25 @@ EOF
 # Generate config.mk
 echo "Generating config.mk..."
 
+if [ "$PLATFORM" = "macos" ]; then
+    LDFLAGS="$LDFLAGS -lcrypto -lssl -lxxhash -framework CoreServices"
+else
+    LDFLAGS="$LDFLAGS -laio -lcrypto -lssl -lxxhash"
+fi
+
 cat > config.mk << EOF
 # Auto-generated configuration makefile
 # DO NOT EDIT MANUALLY - run configure script instead
 
 CXX ?= g++
-CXXFLAGS = ${CXXFLAGS}
-LDFLAGS = -laio -lcrypto -lssl -lxxhash
+CXXFLAGS = -I. ${CXXFLAGS}
+LDFLAGS = ${LDFLAGS}
 SOURCES = ${SOURCES}
 EOF
+
+if [ "$PLATFORM" = "macos" ]; then
+    echo "SOURCES += lib/gcd/gcd.cpp" >> config.mk
+fi
 
 if [ $ENABLE_URING -eq 1 ]; then
     echo "LDFLAGS += -luring" >> config.mk
@@ -222,8 +284,13 @@ echo "Configuration Summary"
 echo "=========================================="
 echo "C++ Compiler:        $CXX"
 echo "C++ Flags:           $CXXFLAGS"
-echo "Required Libraries:  libaio, spdlog"
-echo "Optional Libraries:  liburing"
+echo "Platform:            $PLATFORM"
+if [ "$PLATFORM" = "linux" ]; then
+    echo "Required Libraries:  libaio, spdlog"
+    echo "Optional Libraries:  liburing"
+else
+    echo "Required Libraries:  spdlog, CoreServices"
+fi
 echo "=========================================="
 echo ""
 echo -e "liburing support:    $([ $ENABLE_URING -eq 1 ] && echo -e "${GREEN}enabled${NC}" || echo -e "${YELLOW}disabled${NC}")"

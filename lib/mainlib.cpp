@@ -2,6 +2,12 @@
 
 #include <fstream>
 
+#ifdef __APPLE__
+#include "base/fsevents.hpp"
+#else
+#include "base/inotify.hpp"
+#endif
+
 std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
 {
     std::ifstream f(config_path);
@@ -101,9 +107,20 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
 
 int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger, std::atomic<bool> *stopFlag)
 {
+#ifdef __APPLE__
+    if (options.DirectIO)
+    {
+        std::cerr << "DirectIO is not supported on macOS" << std::endl;
+        return 1;
+    }
+#endif
     // deal with inotify if enabled
     InotifyChannel iChan;
+#ifdef __APPLE__
+    FSEventsWatcher inotifyWatcher(src_p.string(), logger);
+#else
     Inotify inotifyWatcher(src_p.string(), logger);
+#endif
     std::jthread inotifyThread;
     if (options.EnableInotify)
     {
@@ -215,6 +232,13 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 
 int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger)
 {
+#ifdef __APPLE__
+    if (options.DirectIO)
+    {
+        std::cerr << "DirectIO is not supported on macOS" << std::endl;
+        return 1;
+    }
+#endif
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);

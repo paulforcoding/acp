@@ -1,7 +1,11 @@
 #pragma once
 #include "base/logger.hpp"
+#ifdef __APPLE__
+#include "lib/gcd/gcd.hpp"
+#else
 #include "lib/ucp/ucp.hpp"
 #include "lib/acp/acp.hpp"
+#endif
 
 class CopyEngine
 {
@@ -72,6 +76,9 @@ private:
     void startCopyThread(CPFilePairMgr *cpfpMgr)
     {
         std::unique_ptr<IOSlotMgr<IOSlot>> slotMgr;
+#ifdef __APPLE__
+        slotMgr = std::make_unique<GCDSlotMgr>(mOptions, cpfpMgr, mLogger);
+#else
         if (mOptions.CopyEngine == "liburing")
         {
             slotMgr = std::make_unique<UIOSlotMgr>(mOptions, cpfpMgr, mLogger);
@@ -80,6 +87,7 @@ private:
         {
             slotMgr = std::make_unique<AIOSlotMgr>(mOptions, cpfpMgr, mLogger);
         }
+#endif
 
         slotMgr->SetFuncDurationStat(mFuncDurationStat);
         auto run_res = slotMgr->RunQueue();

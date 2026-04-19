@@ -2,7 +2,9 @@
 
 #include <any>
 #include <cstddef> // size_t
+#ifdef __linux__
 #include <libaio.h>
+#endif
 #include <tl/expected.hpp>
 #include <vector>
 #include <map>
@@ -281,19 +283,21 @@ public:
     }
 
     // getters for iocb, used by acp
+#ifdef __linux__
     struct iocb *GetReadIOCB() { return &mIocbRead; }
     struct iocb *GetWriteIOCB() { return &mIocbWrite; }
 
     struct iocb *InitReadIOCB()
     {
-        bzero(&mIocbRead, sizeof(struct iocb));
+        memset(&mIocbRead, 0, sizeof(struct iocb));
         return &mIocbRead;
     }
     struct iocb *InitWriteIOCB()
     {
-        bzero(&mIocbWrite, sizeof(struct iocb));
+        memset(&mIocbWrite, 0, sizeof(struct iocb));
         return &mIocbWrite;
     }
+#endif
 
     // UserData field, not used yet
     const std::any &GetUserData() const { return mUserData; }    // not used yet
@@ -318,8 +322,10 @@ private:
 
     IOInfo mIOInfo;
 
+#ifdef __linux__
     struct iocb mIocbRead;  // 读iocb
     struct iocb mIocbWrite; // 写iocb
+#endif
 
     std::string mType;
     IOSlot *mAssociatedSlot = nullptr;

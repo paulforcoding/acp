@@ -21,7 +21,7 @@
 #define SECTORSIZE 512
 #define DIV_ROUND_UP(n, d) (((n) + (d) - 1) / (d))
 #define ALIGN_MASK(x, mask) (((x) + (mask)) & ~(mask))
-#define ALIGN(x, a) ALIGN_MASK(x, (typeof(x))(a) - 1)
+#define ALIGN(x, a) ALIGN_MASK(x, (decltype(x))(a) - 1)
 
 class AcpException : public std::runtime_error
 {
