@@ -1,20 +1,20 @@
 {
-    "LogLevel": "trace",
-    "LogMode": "console",
-    "LogFilePath": "./acp.log",
-    "CopyEngine": "libaio",
-    "CopyMode": "CksumOnly",
-    "CksumAlgorithm": "xxhash64",
-    "CopyParallelism": 1,
-    "CopyChanSize": 10,
-    "EnableInotify": false,
-    "PreserveSparseFiles": true,
-    "DirectIO": false,
-    "SyncWrites": false,
-    "CopyOptions": {
-        "QueueDepth": 8,
-        "IOSize": 1048576,
-        "Batch": 8,
-        "IOReapWait": 1
-    }
+  "LogLevel": "trace",
+  "LogMode": "console",
+  "LogFilePath": "./acp.log",
+  "CopyEngine": "libaio",
+  "CopyMode": "CopyOnly",
+  "CksumAlgorithm": "xxhash64",
+  "CopyParallelism": 1,
+  "CopyChanSize": 10,
+  "EnableInotify": false,
+  "PreserveSparseFiles": true,
+  "DirectIO": false,
+  "SyncWrites": false,
+  "CopyOptions": {
+    "QueueDepth": 8,
+    "IOSize": 1048576,
+    "Batch": 8,
+    "IOReapWait": 1
+  }
 }
