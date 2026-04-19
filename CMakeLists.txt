@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(acp
-    VERSION 1.0.0
+    VERSION 0.3.0
     DESCRIPTION "AIO File Copy Tool"
     LANGUAGES CXX
 )
@@ -151,6 +151,7 @@ if(PLATFORM_LINUX)
     if(ENABLE_LIBURING)
         target_include_directories(acp PRIVATE ${LIBURING_INCLUDE_DIR})
         target_link_libraries(acp PRIVATE ${LIBURING_LIBRARY})
+        target_compile_definitions(acp PRIVATE ENABLE_LIBURING)
     endif()
 elseif(PLATFORM_MACOS)
     target_link_libraries(acp PRIVATE "-framework CoreServices")
@@ -218,6 +219,7 @@ if(BUILD_TESTS)
         if(ENABLE_LIBURING)
             target_include_directories(test_acp PRIVATE ${LIBURING_INCLUDE_DIR})
             target_link_libraries(test_acp PRIVATE ${LIBURING_LIBRARY})
+            target_compile_definitions(test_acp PRIVATE ENABLE_LIBURING)
         endif()
     elseif(PLATFORM_MACOS)
         target_link_libraries(test_acp PRIVATE "-framework CoreServices")

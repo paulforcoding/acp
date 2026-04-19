@@ -4,9 +4,195 @@
 #include <algorithm>
 #include "lib/mainlib.hpp"
 
+constexpr const char* kVersion = "0.3.0";
+
+#ifdef __APPLE__
+constexpr const char* kPlatform = "macOS";
+#elif defined(__linux__)
+constexpr const char* kPlatform = "Linux";
+#else
+constexpr const char* kPlatform = "Unknown";
+#endif
+
+#if defined(__arm64__) || defined(__aarch64__)
+constexpr const char* kArch = "arm64";
+#elif defined(__x86_64__)
+constexpr const char* kArch = "x86_64";
+#else
+constexpr const char* kArch = "unknown";
+#endif
+
+#ifdef __clang__
+constexpr const char* kCompiler = "Clang " __clang_version__;
+#elif defined(__GNUC__)
+constexpr const char* kCompiler = "GCC " __VERSION__;
+#else
+constexpr const char* kCompiler = "Unknown";
+#endif
+
+static void PrintVersion()
+{
+    std::cout <<
+        "acp version " << kVersion << "\n"
+        "\n"
+        "BUILD\n"
+        "    Platform     " << kPlatform << "\n"
+        "    Architecture " << kArch << "\n"
+        "    Compiler     " << kCompiler << "\n"
+        "\n"
+        "SUPPORTED ENGINES\n"
+#ifdef __APPLE__
+        "    GCD          yes   (default)\n"
+        "    libaio       no\n"
+        "    liburing     no\n"
+#else
+        "    libaio       yes   (default)\n"
+#ifdef ENABLE_LIBURING
+        "    liburing     yes\n"
+#else
+        "    liburing     no    (build with -DENABLE_LIBURING=ON)\n"
+#endif
+        "    GCD          no\n"
+#endif
+        "\n";
+}
+
+static void PrintHelp(const char *program_name)
+{
+    std::cout <<
+        "acp — async cp, high-performance file copy for Linux/macOS\n"
+        "\n"
+        "USAGE\n"
+        "    " << program_name << " <src_path> <dst_path>\n"
+        "\n"
+        "POSITIONAL ARGUMENTS\n"
+        "    src_path    Source path (regular file or directory)\n"
+        "    dst_path    Destination path (regular file or directory)\n"
+        "\n"
+        "CONFIG\n"
+        "    Loaded from ./acp_config.json or /etc/acp_config.json (first found wins).\n"
+        "\n"
+        "CONFIGURATION FIELDS\n"
+        "─────────────────────────────────────────────────────────────────────────\n"
+        "LOGGING\n"
+        "    Note: ProgramLog* controls general application diagnostics (normal/abnormal\n"
+        "    program behavior); FileLog* controls per-file copy progress telemetry\n"
+        "    (what files are being copied and their status).\n"
+        "\n"
+        "    ProgramLogLevel       string   default: \"info\"\n"
+        "                          Values: \"trace\", \"debug\", \"info\", \"warn\", \"error\", \"critical\"\n"
+        "\n"
+        "    ProgramLogMode        string   default: \"console\"\n"
+        "                          Values: \"console\", \"file\"\n"
+        "\n"
+        "    ProgramLogFilePath    string   default: \"./acp.log\"\n"
+        "                          Effective when ProgramLogMode == \"file\".\n"
+        "\n"
+        "    FileLogEnabled        bool     default: false\n"
+        "                          If true, write periodic NDJSON status to FileLogPath.\n"
+        "\n"
+        "    FileLogIntervalSec    int      default: 5\n"
+        "                          Status flush interval in seconds.\n"
+        "\n"
+        "    FileLogPath           string   default: \"./.acp_state.json\"\n"
+        "                          NDJSON status file path.\n"
+        "\n"
+        "COPY ENGINE\n"
+        "    CopyEngine            string   required\n"
+        "                          Values: \"libaio\", \"liburing\" (Linux); \"libaio\" on macOS\n"
+        "                          \"liburing\" requires ENABLE_LIBURING=ON at build time.\n"
+        "                          macOS always uses GCD; CopyEngine value is ignored but must be present.\n"
+        "\n"
+        "    CopyMode              string   required\n"
+        "                          Values: \"CopyOnly\", \"CksumCopy\", \"CksumOnly\"\n"
+        "                          CopyOnly   — standard read/write copy.\n"
+        "                          CksumCopy  — verify checksum before writing; skip matched blocks.\n"
+        "                          CksumOnly  — verify checksum only; write nothing; log mismatches\n"
+        "                                       to ./cksum_result.log.\n"
+        "\n"
+        "    CksumAlgorithm        string   default: \"xxhash64\"\n"
+        "                          Values: \"xxhash64\", \"md5\", \"sha256\"\n"
+        "\n"
+        "    CopyParallelism       int      required, min: 1\n"
+        "                          Number of concurrent copy worker threads.\n"
+        "\n"
+        "    CopyChanSize          int      required, min: 1\n"
+        "                          Bounded channel capacity for file pair dispatch.\n"
+        "\n"
+        "    EnableInotify         bool     default: false\n"
+        "                          If true, monitor source directory for changes after initial copy.\n"
+        "                          On Linux: inotify; on macOS: FSEvents.\n"
+        "                          The process runs indefinitely until interrupted.\n"
+        "\n"
+        "IO OPTIONS (nested under \"CopyOptions\")\n"
+        "    IOSize                size_t   required, default: 1048576\n"
+        "                          Single I/O unit size in bytes.\n"
+        "\n"
+        "    QueueDepth            size_t   required, min: 1\n"
+        "                          Max in-flight asynchronous I/O requests per worker.\n"
+        "\n"
+        "    Batch                 int      required\n"
+        "                          Number of I/Os to submit in one batch.\n"
+        "\n"
+        "    IOReapWait            int      required, unit: seconds\n"
+        "                          Max wait time for I/O completion events.\n"
+        "\n"
+        "ADVANCED\n"
+        "    DirectIO              bool     default: false\n"
+        "                          Use O_DIRECT for unbuffered I/O.\n"
+        "\n"
+        "    SyncWrites            bool     default: false\n"
+        "                          Sync data to disk after each write (fsync per write).\n"
+        "\n"
+        "    PreserveSparseFiles   bool     default: false\n"
+        "                          Preserve sparse file holes instead of writing zero blocks.\n"
+        "\n"
+        "CONFIG EXAMPLE\n"
+        "─────────────────────────────────────────────────────────────────────────\n"
+        "{\n"
+        "  \"ProgramLogLevel\": \"info\",\n"
+        "  \"ProgramLogMode\": \"console\",\n"
+        "  \"ProgramLogFilePath\": \"./acp.log\",\n"
+        "  \"FileLogEnabled\": false,\n"
+        "  \"FileLogIntervalSec\": 5,\n"
+        "  \"FileLogPath\": \"./.acp_state.json\",\n"
+        "  \"CopyEngine\": \"libaio\",\n"
+        "  \"CopyMode\": \"CopyOnly\",\n"
+        "  \"CksumAlgorithm\": \"xxhash64\",\n"
+        "  \"CopyParallelism\": 1,\n"
+        "  \"CopyChanSize\": 10,\n"
+        "  \"EnableInotify\": false,\n"
+        "  \"PreserveSparseFiles\": false,\n"
+        "  \"DirectIO\": false,\n"
+        "  \"SyncWrites\": false,\n"
+        "  \"CopyOptions\": {\n"
+        "    \"QueueDepth\": 8,\n"
+        "    \"IOSize\": 1048576,\n"
+        "    \"Batch\": 8,\n"
+        "    \"IOReapWait\": 1\n"
+        "  }\n"
+        "}\n"
+        "\n"
+        "EXIT CODES\n"
+        "    0   Success\n"
+        "    1   Configuration error, path error, or copy failure\n"
+        "─────────────────────────────────────────────────────────────────────────\n";
+}
+
 int main(int argc, char *argv[])
 {
     namespace fs = std::filesystem;
+
+    if (argc == 2 && (std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0))
+    {
+        PrintHelp(argv[0]);
+        return 0;
+    }
+    if (argc == 2 && (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-v") == 0))
+    {
+        PrintVersion();
+        return 0;
+    }
 
     auto options_opt = LoadCopyOptions("./acp_config.json");
     if (!options_opt)
