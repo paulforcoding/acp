@@ -52,22 +52,27 @@ brew install spdlog openssl xxhash
 
 ## Build
 
+Requires CMake 3.20+.
+
 ```bash
-# Linux (libaio backend, default)
-./configure && make
+# Configure (default: static linking)
+cmake -B build
 
-# Linux (io_uring backend)
-./configure --enable-uring && make
+# Linux: enable io_uring backend
+cmake -B build -DENABLE_LIBURING=ON
 
-# macOS
-./configure && make
+# macOS / dynamic linking
+cmake -B build -DBUILD_STATIC=OFF
+
+# Compile
+cmake --build build -j$(nproc)
 ```
 
-Generated files: `config.h`, `config.mk`. Do not edit manually.
+Build artifacts are placed under `build/`:
 
 ```bash
-make clean      # remove build artifacts
-make distclean  # remove build artifacts + generated config files
+cmake --build build --target clean   # remove build artifacts
+rm -rf build                         # full clean
 ```
 
 ## Configuration
@@ -146,12 +151,14 @@ Same comparison as `CksumCopy`, but never writes. Mismatches are logged to `./ck
 ## Testing
 
 ```bash
-# Build and run all tests
-make test
-./tests/test_all
+# Run all tests
+ctest --test-dir build --output-on-failure
+
+# Or run the test binary directly
+./build/test_acp
 
 # Exclude slow integration tests (large dataset)
-./tests/test_all "~[integration]"
+./build/test_acp "~[integration]"
 ```
 
 Tests cover `Channel`, `CPFilePair`, `CPFilePairMgr`, `IOSlot`, `CksumCopy`, `CksumOnly`, `liburing`, `DirectIO`, `SyncWrites`, `Inotify`, and end-to-end integration scenarios.
@@ -165,10 +172,10 @@ A pre-configured Oracle Linux 9 image is provided:
 docker build -t acp-ol9-dev -f Dockerfile.ol9 .
 
 # Compile inside container
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "./configure --enable-uring && make"
+docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "cmake -B build -DENABLE_LIBURING=ON && cmake --build build"
 
 # Run tests
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./tests/test_all "~[integration]"
+docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./build/test_acp "~[integration]"
 
 # Interactive shell
 docker run -it --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash

@@ -60,3 +60,22 @@ CLAUDE.md
 .aireports/
 .aiinputs/
 .claude/
+
+# clangd
+compile_commands.json
+
+# zed
+.cache/
+.zed
+
+# bin output
+build/
+cmake-build-*/
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Testing/
+Makefile.cmake

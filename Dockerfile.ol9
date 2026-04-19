@@ -9,24 +9,15 @@ RUN dnf install -y oracle-epel-release-el9 \
 
 # Install build dependencies
 RUN dnf install -y \
-    gcc gcc-c++ make cmake git gdb curl \
+    gcc gcc-c++ cmake ninja-build git gdb \
     libaio-devel \
     spdlog-devel \
     fmt-devel \
     openssl-devel \
     xxhash-devel \
     liburing-devel \
-    ninja-build \
+    pkgconfig \
     && dnf clean all
-
-# Install missing tl::expected header (not packaged in OL9/EPEL)
-RUN mkdir -p /usr/include/tl \
-    && curl -L -o /usr/include/tl/expected.hpp \
-       https://raw.githubusercontent.com/TartanLlama/expected/master/include/tl/expected.hpp
-
-# The spdlog-devel package in EPEL is missing bundled fmt headers;
-# it expects external fmt. Append this flag so spdlog uses system fmt.
-ENV CXXFLAGS="-g -std=c++20 -Wall -Wextra -I. -O2 -DSPDLOG_FMT_EXTERNAL"
 
 WORKDIR /acp
 

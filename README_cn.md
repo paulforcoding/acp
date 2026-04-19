@@ -52,22 +52,27 @@ brew install spdlog openssl xxhash
 
 ## 编译构建
 
+需要 CMake 3.20+。
+
 ```bash
-# Linux（libaio 后端，默认）
-./configure && make
+# 配置（默认静态链接）
+cmake -B build
 
-# Linux（io_uring 后端）
-./configure --enable-uring && make
+# Linux：启用 io_uring 后端
+cmake -B build -DENABLE_LIBURING=ON
 
-# macOS
-./configure && make
+# macOS / 动态链接
+cmake -B build -DBUILD_STATIC=OFF
+
+# 编译
+cmake --build build -j$(nproc)
 ```
 
-生成文件：`config.h`、`config.mk`。请勿手动编辑。
+构建产物位于 `build/` 目录下：
 
 ```bash
-make clean      # 清除构建产物
-make distclean  # 清除构建产物 + 生成的配置文件
+cmake --build build --target clean   # 清除构建产物
+rm -rf build                         # 完全清理
 ```
 
 ## 配置说明
@@ -146,12 +151,14 @@ make distclean  # 清除构建产物 + 生成的配置文件
 ## 测试
 
 ```bash
-# 构建并运行全部测试
-make test
-./tests/test_all
+# 运行全部测试
+ctest --test-dir build --output-on-failure
+
+# 或直接运行测试二进制
+./build/test_acp
 
 # 排除慢速集成测试（大文件集）
-./tests/test_all "~[integration]"
+./build/test_acp "~[integration]"
 ```
 
 测试覆盖 `Channel`、`CPFilePair`、`CPFilePairMgr`、`IOSlot`、`CksumCopy`、`CksumOnly`、`liburing`、`DirectIO`、`SyncWrites`、`Inotify` 以及端到端集成场景。
@@ -165,10 +172,10 @@ make test
 docker build -t acp-ol9-dev -f Dockerfile.ol9 .
 
 # 容器内编译
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "./configure --enable-uring && make"
+docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "cmake -B build -DENABLE_LIBURING=ON && cmake --build build"
 
 # 运行测试
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./tests/test_all "~[integration]"
+docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./build/test_acp "~[integration]"
 
 # 交互式 shell
 docker run -it --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash
