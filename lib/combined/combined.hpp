@@ -38,10 +38,10 @@ struct RWCombinedCopyOptions
     std::string CopyEngine;
     std::string CopyMode;       // "CksumCopy", "CopyOnly", "CksumOnly"
     std::string CksumAlgorithm; // "xxhash64", "md5", "sha256"
-    int CopyParallelism;
-    int CopyChanSize;
-    bool EnableInotify;
-    bool PreserveSparseFiles;
+    int CopyParallelism = 1;
+    int CopyChanSize = 10;
+    bool EnableInotify = false;
+    bool PreserveSparseFiles = false;
     bool DirectIO = false;
     bool SyncWrites = false;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
@@ -118,7 +118,7 @@ public:
     }
     void SetReadFinished() { mReadBytes = GetSrcFileSize(); }
     void SetWriteFinished() { mWrittenBytes = GetSrcFileSize(); }
-    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir(); }
+    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir() || IsSymlink(); }
     bool IsDir() const { return mIsDir; }
     bool IsSymlink() const { return mIsSymlink; }
 

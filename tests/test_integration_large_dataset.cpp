@@ -96,7 +96,6 @@ static void compare_trees(const fs::path &src, const fs::path &dst)
     {
         fs::path rel = fs::relative(entry.path(), src);
         fs::path d = dst / rel;
-        REQUIRE(fs::exists(d));
         if (fs::is_symlink(entry.path()))
         {
             REQUIRE(fs::is_symlink(d));

@@ -38,7 +38,13 @@ protected:
     std::atomic_flag mDone = ATOMIC_FLAG_INIT;
 
 public:
-    explicit Channel(int len = CHANNEL_SIZE_DEFAULT) : mSize(len) {}
+    explicit Channel(int len = CHANNEL_SIZE_DEFAULT) : mSize(len)
+    {
+        if (len <= 0)
+        {
+            throw std::invalid_argument("Channel size must be greater than 0");
+        }
+    }
 
     int Size() const
     {
