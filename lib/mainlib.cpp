@@ -99,7 +99,7 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
     }
 }
 
-int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger)
+int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger, std::atomic<bool> *stopFlag)
 {
     // deal with inotify if enabled
     InotifyChannel iChan;
@@ -116,14 +116,15 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         }
         // start a thread to read inotify events and push to copyChannel
         inotifyThread = std::jthread(
-            [&inotifyWatcher, &iChan, logger]()
+            [&inotifyWatcher, &iChan, logger](std::stop_token st)
             {
-                while (true)
+                while (!st.stop_requested())
                 {
                     auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
                     if (!read_res)
                     {
-
+                        if (inotifyWatcher.IsClosed())
+                            break;
                         logger->error("Inotify read event failed: {}", read_res.error().ToString());
                     }
                 }
@@ -177,6 +178,12 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         // read from iChan and push to copyChannel
         while (true)
         {
+            if (stopFlag && stopFlag->load())
+            {
+                inotifyWatcher.Close();
+                iChan.Close();
+                break;
+            }
             auto pop_res = iChan.Pop();
             if (!pop_res)
             {
@@ -186,7 +193,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             std::string changed_path = pop_res.value();
             fs::path changed_rel_path = fs::relative(changed_path, src_p);
             fs::path changed_dst_path = dst_p / changed_rel_path;
-            logger->debug("Detected change in file: {}, scheduling copy to: {}", changed_path, changed_dst_path.string());
+            logger->warn("[inotify] Detected change: src_rel={}, dst={}, full={}", changed_rel_path.string(), changed_dst_path.string(), changed_path);
 
             auto copy_entry = std::make_unique<CopyEntry>();
             copy_entry->srcPath = changed_path;

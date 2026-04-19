@@ -19,11 +19,17 @@ public:
     };
     ~Inotify()
     {
+        Close();
+    };
+    void Close()
+    {
         if (mFD >= 0)
         {
             close(mFD);
+            mFD = -1;
         }
-    };
+    }
+    bool IsClosed() const { return mFD < 0; }
     tl::expected<void, StackError> Init()
     {
         if (mFD < 0)
@@ -59,6 +65,10 @@ public:
 
     tl::expected<void, StackError> ReadEventToChannel(InotifyChannel &channel)
     {
+        if (mFD < 0)
+        {
+            return tl::unexpected(StackError("inotify fd is closed", EBADF));
+        }
         constexpr size_t EVENT_BUF_LEN = 1024 * (sizeof(struct inotify_event) + 16);
         char buffer[EVENT_BUF_LEN];
         ssize_t length = read(mFD, buffer, EVENT_BUF_LEN);

@@ -6,6 +6,7 @@
 #include <thread>
 #include <chrono>
 #include <future>
+#include <atomic>
 
 namespace fs = std::filesystem;
 
@@ -15,6 +16,13 @@ static void ensure_clean_dir(const fs::path &p)
     if (fs::exists(p, ec)) fs::remove_all(p, ec);
     fs::create_directories(p, ec);
     REQUIRE(!ec);
+}
+
+static void write_file(const fs::path &p, const std::string &content)
+{
+    std::ofstream ofs(p, std::ios::binary);
+    REQUIRE(ofs.good());
+    ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
 
 static bool files_equal(const fs::path &a, const fs::path &b)
@@ -42,11 +50,12 @@ static bool files_equal(const fs::path &a, const fs::path &b)
 static RWCombinedCopyOptions make_inotify_options()
 {
     RWCombinedCopyOptions options;
-    options.LogLevel = "info";
+    options.LogLevel = "warn";
     options.LogMode = "console";
     options.CopyEngine = "libaio";
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 1;
+    options.CopyChanSize = 10;
     options.EnableInotify = true;
     options.PreserveSparseFiles = false;
     options.DirectIO = false;
@@ -58,10 +67,7 @@ static RWCombinedCopyOptions make_inotify_options()
     return options;
 }
 
-// NOTE: This test blocks forever because CopyDir with EnableInotify=true
-// enters an infinite monitoring loop. Marked as hidden [. ] so it is not
-// executed in batch runs. Run it explicitly with: -t "inotify"
-TEST_CASE("CopyDir with inotify initial copy", "[integration][inotify][.]")
+TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
 {
     fs::path src_dir = fs::path("testdata") / "inotify_src";
     fs::path dst_dir = fs::path("/tmp") / ("acp_inotify_dst_" + std::to_string(::getpid()));
@@ -69,36 +75,60 @@ TEST_CASE("CopyDir with inotify initial copy", "[integration][inotify][.]")
     ensure_clean_dir(dst_dir);
 
     // Create initial file
-    {
-        std::ofstream ofs(src_dir / "initial.dat", std::ios::binary);
-        ofs << "initial content";
-    }
+    write_file(src_dir / "initial.dat", "initial content");
 
     auto options = make_inotify_options();
     auto logger = InitLogger(options);
 
-    // CopyDir with inotify enabled blocks forever, so run it async
+    std::atomic<bool> stopFlag{false};
+
+    // Run CopyDir with inotify in background
     std::future<int> copy_future = std::async(std::launch::async, [&]() {
-        return CopyDir(src_dir, dst_dir, options, logger);
+        return CopyDir(src_dir, dst_dir, options, logger, &stopFlag);
     });
 
-    // Give it time to do the initial copy
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-    // Verify initial copy succeeded
-    REQUIRE(fs::exists(dst_dir / "initial.dat"));
-
-    // Create a new file to trigger inotify
+    // Wait for initial copy to complete (SSD: should finish within 1s)
+    bool initial_copied = false;
+    for (int i = 0; i < 20; ++i)
     {
-        std::ofstream ofs(src_dir / "newfile.dat", std::ios::binary);
-        ofs << "new content";
+        if (fs::exists(dst_dir / "initial.dat"))
+        {
+            initial_copied = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+    REQUIRE(initial_copied);
+
+    // Create new files to trigger inotify
+    write_file(src_dir / "newfile1.dat", "new content one");
+    write_file(src_dir / "newfile2.dat", "new content two");
+
+    // Wait for inotify to pick up the changes (SSD: should finish within 1s)
+    bool new1_copied = false;
+    bool new2_copied = false;
+    for (int i = 0; i < 20; ++i)
+    {
+        if (!new1_copied && fs::exists(dst_dir / "newfile1.dat"))
+            new1_copied = true;
+        if (!new2_copied && fs::exists(dst_dir / "newfile2.dat"))
+            new2_copied = true;
+        if (new1_copied && new2_copied)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
 
-    // Wait for inotify to pick up the change
-    std::this_thread::sleep_for(std::chrono::seconds(2));
+    REQUIRE(new1_copied);
+    REQUIRE(new2_copied);
+    REQUIRE(files_equal(src_dir / "newfile1.dat", dst_dir / "newfile1.dat"));
+    REQUIRE(files_equal(src_dir / "newfile2.dat", dst_dir / "newfile2.dat"));
 
-    // Verify the new file was copied
-    REQUIRE(fs::exists(dst_dir / "newfile.dat"));
+    // Signal CopyDir to stop
+    stopFlag.store(true);
+
+    // Wait for CopyDir to finish (should exit within 2s)
+    auto status = copy_future.wait_for(std::chrono::seconds(2));
+    REQUIRE(status == std::future_status::ready);
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
