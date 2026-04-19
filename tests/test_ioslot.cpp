@@ -90,7 +90,7 @@ TEST_CASE("IOSlot CPFPPtr")
     IOSlot slot(4096, 0, "rw");
     REQUIRE(slot.GetCPFPPtr() == nullptr);
 
-    auto mockFp = std::make_shared<CPFilePair>("", "", 4096, false, false, false, nullptr);
+    auto mockFp = std::make_shared<CPFilePair>("", "", 4096, false, false, false, nullptr, nullptr);
     slot.SetCPFPPtr(mockFp);
     REQUIRE(slot.GetCPFPPtr() == mockFp);
 }

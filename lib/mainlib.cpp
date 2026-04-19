@@ -2,6 +2,8 @@
 
 #include <fstream>
 
+#include "base/event_reporter.hpp"
+
 #ifdef __APPLE__
 #include "base/fsevents.hpp"
 #else
@@ -29,9 +31,12 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
         options.Batch = copyOpts.at("Batch").get<int>();
         options.IOReapWait = copyOpts.at("IOReapWait").get<int>();
 
-        options.LogLevel = data.at("LogLevel").get<std::string>();
-        options.LogMode = data.at("LogMode").get<std::string>();
-        options.LogFilePath = data.value("LogFilePath", std::string());
+        options.ProgramLogLevel = data.value("ProgramLogLevel", std::string("info"));
+        options.ProgramLogMode = data.value("ProgramLogMode", std::string("console"));
+        options.ProgramLogFilePath = data.value("ProgramLogFilePath", std::string("./acp.log"));
+        options.FileLogEnabled = data.value("FileLogEnabled", false);
+        options.FileLogIntervalSec = data.value("FileLogIntervalSec", 5);
+        options.FileLogPath = data.value("FileLogPath", std::string("./.acp_state.json"));
         options.CopyEngine = data.at("CopyEngine").get<std::string>();
         options.CopyMode = data.at("CopyMode").get<std::string>();
         options.CksumAlgorithm = data.value("CksumAlgorithm", std::string("xxhash64"));
@@ -79,16 +84,17 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
 std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
 {
     std::shared_ptr<ILogger> myLogger;
-    if (options.LogMode == "file")
+    if (options.ProgramLogMode == "file")
     {
         auto logger = spdlog::get("file");
         if (!logger)
         {
-            logger = spdlog::basic_logger_mt("file", options.LogFilePath);
+            logger = spdlog::basic_logger_mt("file", options.ProgramLogFilePath);
         }
-        logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
+        logger->set_level(spdlog::level::from_str("trace"));
+        logger->set_pattern("%v");
         myLogger = std::make_shared<SpdLogger>(logger);
-        myLogger->set_level(options.LogLevel);
+        myLogger->set_level(options.ProgramLogLevel);
         return myLogger;
     }
     else
@@ -98,9 +104,10 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
         {
             logger = spdlog::stdout_color_mt("console");
         }
-        logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
+        logger->set_level(spdlog::level::from_str("trace"));
+        logger->set_pattern("%v");
         myLogger = std::make_shared<SpdLogger>(logger);
-        myLogger->set_level(options.LogLevel);
+        myLogger->set_level(options.ProgramLogLevel);
         return myLogger;
     }
 }
@@ -150,7 +157,8 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     // 开始创建各种对象，注入依赖
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogIntervalSec, options.FileLogPath);
+    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     // start a thread to run CopyEngine
     std::thread file_copy_thread(
@@ -159,7 +167,6 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             auto copy_res = fc->RunChannel(copyChannel);
             if (!copy_res)
             {
-                // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
                 logger->error("File copy failed: {}", copy_res.error().ToString());
             }
         });
@@ -176,21 +183,70 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             return 1;
         }
     }
+
     // recursively walk through source directory and prepare file pairs
+    size_t filesSeen = 0;
+    size_t dirsSeen = 0;
+    size_t symlinksSeen = 0;
+    size_t bytesSeen = 0;
+    size_t filesRegular = 0;
+    size_t filesUnsupported = 0;
+    auto scanStart = std::chrono::steady_clock::now();
+
     for (const auto &entry : fs::recursive_directory_iterator(src_p))
     {
         fs::path relative_path = fs::relative(entry.path(), src_p);
         fs::path dst_file_path = dst_p / relative_path;
 
+        auto status = entry.symlink_status();
+        if (fs::is_symlink(status))
+        {
+            symlinksSeen++;
+        }
+        else if (fs::is_directory(status))
+        {
+            dirsSeen++;
+        }
+        else if (fs::is_regular_file(status))
+        {
+            filesRegular++;
+            bytesSeen += fs::file_size(entry.path());
+        }
+        else
+        {
+            filesUnsupported++;
+        }
+        filesSeen++;
+
         auto copy_entry = std::make_unique<CopyEntry>();
         copy_entry->srcPath = entry.path().string();
         copy_entry->dstPath = dst_file_path.string();
-        logger->debug("pushed file pair: src: {}, dst: {}", copy_entry->srcPath, copy_entry->dstPath);
         copyChannel.Push(copy_entry);
+
+        // emit scanning progress every 1000 files
+        if (reporter && filesSeen % 1000 == 0)
+        {
+            reporter->CopyPlan("scanning", filesSeen, dirsSeen, symlinksSeen, bytesSeen, filesRegular, filesUnsupported);
+        }
+    }
+
+    if (reporter)
+    {
+        reporter->CopyPlan("completed", filesSeen, dirsSeen, symlinksSeen, bytesSeen, filesRegular, filesUnsupported);
+        reporter->SetFilesTotal(filesSeen);
+        reporter->SetBytesTotal(bytesSeen);
     }
 
     if (options.EnableInotify)
     {
+        auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::steady_clock::now() - scanStart)
+                                .count();
+        if (reporter)
+        {
+            reporter->CopyComplete(copyDuration);
+            reporter->FinalizeStateFile();
+        }
         logger->warn("Done copying from: {} to: {}, now monitoring for changes...", src_p.string(), dst_p.string());
         // read from iChan and push to copyChannel
         while (true)
@@ -215,7 +271,6 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             auto copy_entry = std::make_unique<CopyEntry>();
             copy_entry->srcPath = changed_path;
             copy_entry->dstPath = changed_dst_path.string();
-            logger->debug("pushed file pair: src: {}, dst: {}", copy_entry->srcPath, copy_entry->dstPath);
             copyChannel.Push(copy_entry);
         }
         // main() never exits normally when inotify is enabled
@@ -225,6 +280,15 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     copyChannel.Close();
 
     file_copy_thread.join();
+
+    auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - scanStart)
+                            .count();
+    if (reporter)
+    {
+        reporter->CopyComplete(copyDuration);
+        reporter->FinalizeStateFile();
+    }
 
     funcDurationStat->PrintStats();
     return 0;
@@ -241,16 +305,30 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 #endif
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogIntervalSec, options.FileLogPath);
+    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
+
+    // gather file info for copy_plan
+    size_t fileSize = 0;
+    if (fs::exists(src_file) && fs::is_regular_file(src_file))
+    {
+        fileSize = fs::file_size(src_file);
+    }
+    if (reporter)
+    {
+        reporter->CopyPlan("completed", 1, 0, 0, fileSize, 1, 0);
+        reporter->SetFilesTotal(1);
+        reporter->SetBytesTotal(fileSize);
+    }
 
     // start a thread to run CopyEngine
+    auto copyStart = std::chrono::steady_clock::now();
     std::thread file_copy_thread(
         [fc = std::move(file_copier), &copyChannel, logger]()
         {
             auto copy_res = fc->RunChannel(copyChannel);
             if (!copy_res)
             {
-                // std::cerr << "File copy failed: " << copy_res.error().ToString() << std::endl;
                 logger->error("File copy failed: {}", copy_res.error().ToString());
             }
         });
@@ -258,12 +336,20 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     auto copy_entry = std::make_unique<CopyEntry>();
     copy_entry->srcPath = src_file.string();
     copy_entry->dstPath = dst_file.string();
-    logger->debug("pushed file pair: src: {}, dst: {}", copy_entry->srcPath, copy_entry->dstPath);
     copyChannel.Push(copy_entry);
 
     copyChannel.Close();
 
     file_copy_thread.join();
+
+    auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - copyStart)
+                            .count();
+    if (reporter)
+    {
+        reporter->CopyComplete(copyDuration);
+        reporter->FinalizeStateFile();
+    }
 
     funcDurationStat->PrintStats();
 

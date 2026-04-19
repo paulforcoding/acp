@@ -1,6 +1,18 @@
 # acp — Asynchronous File Copy Tool
 
+**acp** = **a**sync **cp**
+
 High-performance file copy using Linux AIO / io_uring and macOS Grand Central Dispatch, with optional inotify/FSEvents directory monitoring and block-level checksum verification.
+
+## Project Vision
+
+1. **acp** stands for **async cp** — a drop-in, high-performance replacement for the native `cp` command on Linux and macOS.
+2. Designed to **replace native `cp`** with superior throughput via async I/O, while keeping all CLI behaviors identical to `cp`.
+3. **cp-compatible behavior** — command-line usage, path handling, and exit semantics mirror the standard `cp` command.
+4. **Supported file types** — regular files, directories, and symbolic links only. Special files (device files, sockets, FIFOs/pipes, etc.) are explicitly unsupported.
+5. **Continuous replication** — optional `inotify` (Linux) / `FSEvents` (macOS) monitoring keeps the destination in sync with the source in real time.
+6. **AI-agent friendly** — structured logging, progress telemetry, and machine-readable status make it easy for AI agents to observe and reason about copy operations.
+7. **Enterprise-grade migration** — built for large-scale data migration, efficiently handling both massive quantities of small files and very large individual files.
 
 ## Features
 
@@ -83,9 +95,12 @@ Example `acp_config.json`:
 
 ```json
 {
-  "LogLevel": "info",
-  "LogMode": "console",
-  "LogFilePath": "/var/log/acp.log",
+  "ProgramLogLevel": "info",
+  "ProgramLogMode": "console",
+  "ProgramLogFilePath": "./acp.log",
+  "FileLogEnabled": false,
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "./.acp_state.json",
   "CopyEngine": "libaio",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
@@ -108,6 +123,12 @@ Example `acp_config.json`:
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| `ProgramLogLevel` | `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"` | `"info"` |
+| `ProgramLogMode` | `"console"` or `"file"` | `"console"` |
+| `ProgramLogFilePath` | Program log file path (mode=file) | `"./acp.log"` |
+| `FileLogEnabled` | Enable structured file progress events | `false` |
+| `FileLogIntervalSec` | Progress summary interval in seconds | `5` |
+| `FileLogPath` | State file path (`""` to disable) | `"./.acp_state.json"` |
 | `CopyEngine` | `"libaio"`, `"liburing"` (Linux), `"gcd"` (macOS) | `"libaio"` |
 | `CopyMode` | `"CopyOnly"`, `"CksumCopy"`, `"CksumOnly"` | `"CopyOnly"` |
 | `CksumAlgorithm` | `"xxhash64"`, `"md5"`, `"sha256"` | `"xxhash64"` |

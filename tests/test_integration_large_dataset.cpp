@@ -130,8 +130,8 @@ TEST_CASE("integration_large_dataset_copy_verify", "[integration][large]")
     generate_dataset(src_root);
 
     RWCombinedCopyOptions options;
-    options.LogLevel = "info";
-    options.LogMode = "console";
+    options.ProgramLogLevel = "info";
+    options.ProgramLogMode = "console";
     options.CopyEngine = "libaio"; // or "liburing"
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 2;

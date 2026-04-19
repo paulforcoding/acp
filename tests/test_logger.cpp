@@ -76,18 +76,20 @@ TEST_CASE("ConsoleLogger log_impl outputs all levels")
     std::cerr.rdbuf(oldBuf);
     std::string output = ss.str();
 
-    REQUIRE(output.find("[TRACE]") != std::string::npos);
-    REQUIRE(output.find("trace-msg") != std::string::npos);
-    REQUIRE(output.find("[DEBUG]") != std::string::npos);
-    REQUIRE(output.find("debug-msg") != std::string::npos);
-    REQUIRE(output.find("[INFO]") != std::string::npos);
-    REQUIRE(output.find("info-msg") != std::string::npos);
-    REQUIRE(output.find("[WARN]") != std::string::npos);
-    REQUIRE(output.find("warn-msg") != std::string::npos);
-    REQUIRE(output.find("[ERROR]") != std::string::npos);
-    REQUIRE(output.find("error-msg") != std::string::npos);
-    REQUIRE(output.find("[FATAL]") != std::string::npos);
-    REQUIRE(output.find("fatal-msg") != std::string::npos);
+    REQUIRE(output.find("\"type\":\"program_log\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"trace\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"trace-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"debug\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"debug-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"info\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"info-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"warn\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"warn-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"error\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"error-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"level\":\"fatal\"") != std::string::npos);
+    REQUIRE(output.find("\"msg\":\"fatal-msg\"") != std::string::npos);
+    REQUIRE(output.find("\"timestamp\"") != std::string::npos);
 }
 
 TEST_CASE("ConsoleLogger filters below level")

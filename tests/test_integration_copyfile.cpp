@@ -48,8 +48,8 @@ static bool files_equal(const fs::path &a, const fs::path &b)
 static RWCombinedCopyOptions make_copyfile_options()
 {
     RWCombinedCopyOptions options;
-    options.LogLevel = "info";
-    options.LogMode = "console";
+    options.ProgramLogLevel = "info";
+    options.ProgramLogMode = "console";
     options.CopyEngine = "libaio";
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 1;

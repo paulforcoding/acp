@@ -1,6 +1,11 @@
 #pragma once
 
+#include <algorithm>
+#include <chrono>
+#include <cstdio>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <atomic>
 
@@ -23,6 +28,84 @@ enum class Level : int
     Error = 4,
     Fatal = 5,
 };
+
+inline const char *LevelToStr(Level lvl)
+{
+    switch (lvl)
+    {
+    case Level::Trace:
+        return "trace";
+    case Level::Debug:
+        return "debug";
+    case Level::Info:
+        return "info";
+    case Level::Warn:
+        return "warn";
+    case Level::Error:
+        return "error";
+    case Level::Fatal:
+        return "fatal";
+    }
+    return "unknown";
+}
+
+// JSON string escaping: handles ", \, \b, \f, \n, \r, \t
+inline std::string EscapeJsonString(std::string_view s)
+{
+    std::string result;
+    result.reserve(s.size() + s.size() / 4);
+    for (char c : s)
+    {
+        switch (c)
+        {
+        case '"':
+            result += "\\\"";
+            break;
+        case '\\':
+            result += "\\\\";
+            break;
+        case '\b':
+            result += "\\b";
+            break;
+        case '\f':
+            result += "\\f";
+            break;
+        case '\n':
+            result += "\\n";
+            break;
+        case '\r':
+            result += "\\r";
+            break;
+        case '\t':
+            result += "\\t";
+            break;
+        default:
+            if (static_cast<unsigned char>(c) < 0x20)
+            {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\u%04x", c);
+                result += buf;
+            }
+            else
+            {
+                result += c;
+            }
+        }
+    }
+    return result;
+}
+
+inline std::string CurrentIsoTimestamp()
+{
+    auto now = std::chrono::system_clock::now();
+    auto time = std::chrono::system_clock::to_time_t(now);
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()) % 1000;
+
+    std::ostringstream oss;
+    oss << std::put_time(std::gmtime(&time), "%Y-%m-%dT%H:%M:%S");
+    oss << '.' << std::setfill('0') << std::setw(3) << ms.count() << 'Z';
+    return oss.str();
+}
 
 // 通用 Logger 基类：提供级别管理和模板包装器。
 struct ILogger
@@ -84,38 +167,17 @@ private:
     std::atomic<int> mLevel{static_cast<int>(Level::Info)};
 };
 
-// 控制台实现
+// 控制台实现 — 统一输出 NDJSON
 struct ConsoleLogger : ILogger
 {
     void log_impl(Level lvl, const std::string &msg) override
     {
-        const char *prefix = nullptr;
-        switch (lvl)
-        {
-        case Level::Trace:
-            prefix = "[TRACE] ";
-            break;
-        case Level::Debug:
-            prefix = "[DEBUG] ";
-            break;
-        case Level::Info:
-            prefix = "[INFO]  ";
-            break;
-        case Level::Warn:
-            prefix = "[WARN]  ";
-            break;
-        case Level::Error:
-            prefix = "[ERROR] ";
-            break;
-        case Level::Fatal:
-            prefix = "[FATAL] ";
-            break;
-        }
-        std::cerr << prefix << msg << '\n';
+        std::cerr << fmt::format("{{\"type\":\"program_log\",\"level\":\"{}\",\"msg\":\"{}\",\"timestamp\":\"{}\"}}\n",
+                                 LevelToStr(lvl), EscapeJsonString(msg), CurrentIsoTimestamp());
     }
 };
 
-// Spdlog 适配器：将 ILogger 的调用转发到 std::shared_ptr<spdlog::logger>
+// Spdlog 适配器 — 统一输出 NDJSON
 struct SpdLogger : ILogger
 {
     explicit SpdLogger(std::shared_ptr<spdlog::logger> lg)
@@ -127,27 +189,9 @@ struct SpdLogger : ILogger
     {
         if (!mLg)
             return;
-        switch (lvl)
-        {
-        case Level::Trace:
-            mLg->trace(msg);
-            break;
-        case Level::Debug:
-            mLg->debug(msg);
-            break;
-        case Level::Info:
-            mLg->info(msg);
-            break;
-        case Level::Warn:
-            mLg->warn(msg);
-            break;
-        case Level::Error:
-            mLg->error(msg);
-            break;
-        case Level::Fatal:
-            mLg->critical(msg);
-            break;
-        }
+        std::string json = fmt::format("{{\"type\":\"program_log\",\"level\":\"{}\",\"msg\":\"{}\",\"timestamp\":\"{}\"}}",
+                                         LevelToStr(lvl), EscapeJsonString(msg), CurrentIsoTimestamp());
+        mLg->log(spdlog::level::info, json);
     }
 
 private:

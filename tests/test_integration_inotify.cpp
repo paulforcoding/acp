@@ -50,8 +50,8 @@ static bool files_equal(const fs::path &a, const fs::path &b)
 static RWCombinedCopyOptions make_inotify_options()
 {
     RWCombinedCopyOptions options;
-    options.LogLevel = "warn";
-    options.LogMode = "console";
+    options.ProgramLogLevel = "warn";
+    options.ProgramLogMode = "console";
     options.CopyEngine = "libaio";
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 1;

@@ -1,5 +1,6 @@
 #pragma once
 #include "base/logger.hpp"
+#include "base/event_reporter.hpp"
 #ifdef __APPLE__
 #include "lib/gcd/gcd.hpp"
 #else
@@ -12,10 +13,12 @@ class CopyEngine
 public:
     CopyEngine(const RWCombinedCopyOptions &options,
                std::shared_ptr<ILogger> logger,
-               std::shared_ptr<FuncDurationStat> funcDurationStat)
+               std::shared_ptr<FuncDurationStat> funcDurationStat,
+               FileLogReporter *reporter)
         : mOptions(options),
           mLogger(logger),
-          mFuncDurationStat(funcDurationStat) {};
+          mFuncDurationStat(funcDurationStat),
+          mReporter(reporter) {};
 
     tl::expected<void, StackError> RunChannel(Channel<CopyEntry> &channel)
     {
@@ -28,7 +31,7 @@ public:
 
         for (int i = 0; i < mOptions.CopyParallelism; ++i)
         {
-            cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(mOptions, mLogger));
+            cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(mOptions, mLogger, mReporter));
             threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get());
         }
         // 主线程负责从channel中取出CopyEntry，分发到各个CPFilePairMgr中
@@ -77,15 +80,15 @@ private:
     {
         std::unique_ptr<IOSlotMgr<IOSlot>> slotMgr;
 #ifdef __APPLE__
-        slotMgr = std::make_unique<GCDSlotMgr>(mOptions, cpfpMgr, mLogger);
+        slotMgr = std::make_unique<GCDSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
 #else
         if (mOptions.CopyEngine == "liburing")
         {
-            slotMgr = std::make_unique<UIOSlotMgr>(mOptions, cpfpMgr, mLogger);
+            slotMgr = std::make_unique<UIOSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
         }
         else
         {
-            slotMgr = std::make_unique<AIOSlotMgr>(mOptions, cpfpMgr, mLogger);
+            slotMgr = std::make_unique<AIOSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
         }
 #endif
 
@@ -101,4 +104,5 @@ private:
     RWCombinedCopyOptions mOptions;
     std::shared_ptr<ILogger> mLogger;
     std::shared_ptr<FuncDurationStat> mFuncDurationStat;
+    FileLogReporter *mReporter = nullptr;
 };

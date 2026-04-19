@@ -1,7 +1,10 @@
 {
-  "LogLevel": "trace",
-  "LogMode": "console",
-  "LogFilePath": "./acp.log",
+  "ProgramLogLevel": "info",
+  "ProgramLogMode": "console",
+  "ProgramLogFilePath": "./acp.log",
+  "FileLogEnabled": false,
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "./.acp_state.json",
   "CopyEngine": "libaio",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",

@@ -14,8 +14,9 @@ class GCDSlotMgr : public IOSlotMgr<IOSlot>
 public:
     GCDSlotMgr(const RWCombinedCopyOptions &options,
                CPFilePairMgr *filePairMgr,
-               std::shared_ptr<ILogger> logger)
-        : IOSlotMgr<IOSlot>(options, filePairMgr, logger)
+               std::shared_ptr<ILogger> logger,
+               FileLogReporter *reporter)
+        : IOSlotMgr<IOSlot>(options, filePairMgr, logger, reporter)
     {
     }
     ~GCDSlotMgr() override

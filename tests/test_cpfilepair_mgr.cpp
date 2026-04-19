@@ -27,7 +27,7 @@ TEST_CASE("CPFilePairMgr PeekFront after AddFilePair", "[cpfilepairmgr]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     // Before AddFilePair, channel is empty but not closed
     REQUIRE(mgr.IsStopRequested() == false);
 
@@ -53,7 +53,7 @@ TEST_CASE("CPFilePairMgr GetNextReadIO single file", "[cpfilepairmgr]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     auto add_res = mgr.AddFilePair(src_file, dst_dir + "/file.txt");
     REQUIRE(add_res.has_value());
     mgr.SetStopFlag();
@@ -76,7 +76,7 @@ TEST_CASE("CPFilePairMgr GetNextReadIO returns null at end", "[cpfilepairmgr]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     mgr.SetStopFlag();
 
     auto next = mgr.GetNextReadIO();
@@ -92,7 +92,7 @@ TEST_CASE("CPFilePairMgr WaitForWorkOrClose lifecycle", "[cpfilepairmgr]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     // Empty and not closed: should wait then return true (timeout)
     REQUIRE(mgr.WaitForWorkOrClose(std::chrono::milliseconds(10)));
 
@@ -101,7 +101,7 @@ TEST_CASE("CPFilePairMgr WaitForWorkOrClose lifecycle", "[cpfilepairmgr]")
     REQUIRE_FALSE(mgr.WaitForWorkOrClose(std::chrono::milliseconds(10)));
 
     // Reset for next test: add a file pair before closing
-    CPFilePairMgr mgr2(opts, logger);
+    CPFilePairMgr mgr2(opts, logger, nullptr);
     auto add_res = mgr2.AddFilePair("/tmp/a", "/tmp/b");
     REQUIRE(add_res.has_value());
     mgr2.SetStopFlag();
@@ -125,7 +125,7 @@ TEST_CASE("CPFilePairMgr CheckWriteComplete with finished file", "[cpfilepairmgr
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     auto add_res = mgr.AddFilePair(src_file, dst_dir + "/file.txt");
     REQUIRE(add_res.has_value());
     mgr.SetStopFlag();
@@ -162,7 +162,7 @@ TEST_CASE("CPFilePairMgr multiple files round robin", "[cpfilepairmgr]")
     opts.DirectIO = false;
     opts.SyncWrites = false;
 
-    CPFilePairMgr mgr(opts, logger);
+    CPFilePairMgr mgr(opts, logger, nullptr);
     auto r1 = mgr.AddFilePair(src_dir + "/a.txt", dst_dir + "/a.txt");
     REQUIRE(r1.has_value());
     auto r2 = mgr.AddFilePair(src_dir + "/b.txt", dst_dir + "/b.txt");

@@ -1,4 +1,5 @@
 #include <filesystem>
+#include "base/event_reporter.hpp"
 #include "lib/combined/combined.hpp"
 
 CPFilePair::CPFilePair(std::string_view src_path,
@@ -7,14 +8,16 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        bool direct_io,
                        bool sync_writes,
                        bool cksum,
-                       std::shared_ptr<ILogger> logger)
+                       std::shared_ptr<ILogger> logger,
+                       FileLogReporter* reporter)
     : mSrcPath(src_path),
       mDstPath(dst_path),
       mIOSize(io_size),
       mDirectIO(direct_io),
       mSyncWrites(sync_writes),
       mCksum(cksum),
-      mLogger(logger)
+      mLogger(logger),
+      mReporter(reporter)
 {
     memset(&mSrcStat, 0, sizeof(struct stat));
     memset(&mDstStat, 0, sizeof(struct stat));
@@ -56,8 +59,12 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                 fmt::format("Failed to create symlink at destination: {}, pointing to: {}, errstr: {}",
                             mDstPath, target_path.string(), ec.message())));
         }
-        mLogger->debug("Source is a symlink, created destination symlink: {} -> {}",
-                       mDstPath, target_path.string());
+        if (mReporter)
+        {
+            mReporter->FileStart(mSrcPath, mDstPath, 0);
+            mReporter->FileComplete(mSrcPath, mDstPath, 0, 0);
+            mReporter->IncrementFilesDone();
+        }
         return {};
     }
 
@@ -72,7 +79,12 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             return tl::unexpected(StackError(
                 fmt::format("Failed to create destination directory: {}, errstr: {}", mDstPath, ec.message())));
         }
-        mLogger->debug("Source is a directory, created destination directory: {}", mDstPath);
+        if (mReporter)
+        {
+            mReporter->FileStart(mSrcPath, mDstPath, 0);
+            mReporter->FileComplete(mSrcPath, mDstPath, 0, 0);
+            mReporter->IncrementFilesDone();
+        }
         return {};
     }
 
@@ -80,6 +92,10 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     if (!fs::is_regular_file(mSrcPath))
     {
         // std::filesystem::file_type is not directly formattable by fmt, cast to int for diagnostic
+        if (mReporter)
+        {
+            mReporter->FileError(mSrcPath, fmt::format("unsupported file type: {}", static_cast<int>(fs::status(mSrcPath).type())), ENOTSUP, "skipped");
+        }
         return tl::unexpected(StackError(
             fmt::format("src: {} is not supported file type: {}", mSrcPath, static_cast<int>(fs::status(mSrcPath).type())), ENOTSUP));
     }
@@ -99,6 +115,10 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     if (mSrcFd < 0)
     {
+        if (mReporter)
+        {
+            mReporter->FileError(mSrcPath, strerror(errno), errno, "failed");
+        }
         return tl::unexpected(StackError(
             fmt::format("open src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
     }
@@ -145,11 +165,19 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     if (mDstFd < 0)
     {
+        if (mReporter)
+        {
+            mReporter->FileError(mSrcPath, strerror(errno), errno, "failed");
+        }
         return tl::unexpected(StackError(
             fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
     }
 
-    mLogger->debug("Initialized file pair: src: {}, dst: {}, size: {}", mSrcPath, mDstPath, GetSrcFileSize());
+    if (mReporter)
+    {
+        mReporter->FileStart(mSrcPath, mDstPath, GetSrcFileSize());
+    }
+    mStartTime = std::chrono::steady_clock::now();
     return {};
 }
 
@@ -182,8 +210,10 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
             {
                 if (init_res.error().Code() == ENOTSUP)
                 {
-                    mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
-                                  front->GetSrcPath(), front->GetDstPath(), init_res.error().ToString());
+                    if (mReporter)
+                    {
+                        mReporter->FileUnsupported(front->GetSrcPath(), init_res.error().ToString(), "skipped");
+                    }
                     mChannel.PopFront();
                     continue;
                 }
@@ -206,6 +236,10 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
         if (read_complete_res.value())
         {
             continue;
+        }
+        if (mReporter)
+        {
+            mReporter->SetCurrentFile(front->GetSrcPath());
         }
         mLogger->trace("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
                        front->GetSrcPath(), front->GetDstPath(), front->GetReadOffset());
@@ -276,8 +310,12 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
         mChannel.RemoveFromInflight(pFP);
 
-        mLogger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
-                       pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mChannel.InflightCount());
+        if (mReporter)
+        {
+            mReporter->FileComplete(pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), pFP->GetElapsedMs());
+            mReporter->IncrementFilesDone();
+            mReporter->AddBytesDone(pFP->GetSrcFileSize());
+        }
     }
     return {};
 }

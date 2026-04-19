@@ -17,6 +17,7 @@
 #include "base/base.hpp"
 #include "base/chan.hpp"
 #include "base/digest.hpp"
+#include "base/event_reporter.hpp"
 
 struct CopyEntry
 {
@@ -34,9 +35,12 @@ struct CopyEntry
 
 struct RWCombinedCopyOptions
 {
-    std::string LogLevel;
-    std::string LogMode;
-    std::string LogFilePath;
+    std::string ProgramLogLevel;
+    std::string ProgramLogMode;
+    std::string ProgramLogFilePath;
+    bool FileLogEnabled = false;
+    int FileLogIntervalSec = 5;
+    std::string FileLogPath;
     std::string CopyEngine;
     std::string CopyMode;       // "CksumCopy", "CopyOnly", "CksumOnly"
     std::string CksumAlgorithm; // "xxhash64", "md5", "sha256"
@@ -63,7 +67,8 @@ public:
                bool direct_io,
                bool sync_writes,
                bool cksum,
-               std::shared_ptr<ILogger> logger); // full path expected
+               std::shared_ptr<ILogger> logger,
+               FileLogReporter* reporter); // full path expected
     ~CPFilePair()
     {
         if (mSrcFd >= 0)
@@ -127,6 +132,13 @@ public:
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
 
+    int64_t GetElapsedMs() const
+    {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - mStartTime)
+            .count();
+    }
+
     void MarkAsInflight() { mIsInflight = true; }
     bool IsInflight() const { return mIsInflight; }
     void MarkAsCompleted() { mIsCompleted = true; }
@@ -156,14 +168,17 @@ private:
     bool mIsCompleted = false;
 
     std::shared_ptr<ILogger> mLogger;
+    FileLogReporter* mReporter = nullptr;
+    std::chrono::steady_clock::time_point mStartTime;
 };
 
 class CPFilePairMgr
 {
 public:
     CPFilePairMgr(const RWCombinedCopyOptions &options,
-                  std::shared_ptr<ILogger> logger)
-        : mOptions(options), mLogger(logger) {}
+                  std::shared_ptr<ILogger> logger,
+                  FileLogReporter* reporter)
+        : mOptions(options), mLogger(logger), mReporter(reporter) {}
 
     tl::expected<void, StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
     {
@@ -173,7 +188,8 @@ public:
                        mOptions.DirectIO,
                        mOptions.SyncWrites,
                        (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
-                       mLogger));
+                       mLogger,
+                       mReporter));
         return {};
     }
 
@@ -193,6 +209,7 @@ private:
 private:
     RWCombinedCopyOptions mOptions;
     std::shared_ptr<ILogger> mLogger;
+    FileLogReporter* mReporter = nullptr;
     FPChannel mChannel;
 };
 
@@ -338,8 +355,9 @@ class IOSlotMgr
 public:
     IOSlotMgr(const RWCombinedCopyOptions &options,
               CPFilePairMgr *file_pair_mgr,
-              std::shared_ptr<ILogger> logger)
-        : mOptions(options), mCPFPMgr(file_pair_mgr), mLogger(logger)
+              std::shared_ptr<ILogger> logger,
+              FileLogReporter* reporter)
+        : mOptions(options), mCPFPMgr(file_pair_mgr), mLogger(logger), mReporter(reporter)
     {
         size_t slot_count = options.QueueDepth;
         size_t buf_size = options.IoSize;
@@ -523,6 +541,12 @@ public:
                 {
                     break;
                 }
+            }
+
+            if (mReporter)
+            {
+                mReporter->MaybeEmitProgressSummary();
+                mReporter->UpdateStateFile();
             }
 
             round++;
@@ -881,6 +905,10 @@ protected:
                 PrepareOneRead(slot, offset, slot->GetCPFPPtr());
                 return {};
             }
+            if (mReporter)
+            {
+                mReporter->FileError(slot->GetCPFPPtr()->GetSrcPath(), strerror(-io_ret), -io_ret, "failed");
+            }
             return tl::unexpected(StackError(
                 fmt::format("read failed, errno: {}, errstr: {}, slotType: {}", -io_ret, strerror(-io_ret), slot->GetType())));
         }
@@ -1015,6 +1043,10 @@ protected:
                 PrepareOneWrite(slot);
                 return {};
             }
+            if (mReporter)
+            {
+                mReporter->FileError(slot->GetCPFPPtr()->GetSrcPath(), strerror(-io_ret), -io_ret, "failed");
+            }
             return tl::unexpected(StackError(
                 fmt::format("AIO write failed, errno: {}, errstr: {}, offset: {}, io_size: {}",
                             io_ret, strerror(-io_ret), offset, io_size)));
@@ -1056,6 +1088,7 @@ protected:
     CPFilePairMgr *mCPFPMgr;
 
     std::shared_ptr<ILogger> mLogger;
+    FileLogReporter* mReporter = nullptr;
     std::shared_ptr<FuncDurationStat> mFuncDurationStat;
 
     std::unique_ptr<Digest> mDigest;
