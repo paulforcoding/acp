@@ -1,20 +1,99 @@
 #include "lib/mainlib.hpp"
+
+#include <fstream>
+
+std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
+{
+    std::ifstream f(config_path);
+    if (!f.is_open())
+    {
+        return std::nullopt;
+    }
+
+    using json = nlohmann::json;
+    try
+    {
+        json data = json::parse(f);
+
+        RWCombinedCopyOptions options;
+
+        auto copyOpts = data.at("CopyOptions");
+        options.IoSize = copyOpts.at("IOSize").get<size_t>();
+        options.QueueDepth = copyOpts.at("QueueDepth").get<size_t>();
+        options.Batch = copyOpts.at("Batch").get<int>();
+        options.IOReapWait = copyOpts.at("IOReapWait").get<int>();
+
+        options.LogLevel = data.at("LogLevel").get<std::string>();
+        options.LogMode = data.at("LogMode").get<std::string>();
+        options.LogFilePath = data.value("LogFilePath", std::string());
+        options.CopyEngine = data.at("CopyEngine").get<std::string>();
+        options.CopyMode = data.at("CopyMode").get<std::string>();
+        options.CksumAlgorithm = data.value("CksumAlgorithm", std::string("xxhash64"));
+        options.CopyParallelism = data.at("CopyParallelism").get<int>();
+        options.CopyChanSize = data.at("CopyChanSize").get<int>();
+        options.DirectIO = data.value("DirectIO", false);
+        options.EnableInotify = data.value("EnableInotify", false);
+        options.PreserveSparseFiles = data.value("PreserveSparseFiles", false);
+
+        if (options.IoSize == 0)
+        {
+            std::cerr << "Configuration error: IOSize must be greater than 0" << std::endl;
+            return std::nullopt;
+        }
+        if (options.QueueDepth == 0)
+        {
+            std::cerr << "Configuration error: QueueDepth must be greater than 0" << std::endl;
+            return std::nullopt;
+        }
+        if (options.CopyParallelism <= 0)
+        {
+            std::cerr << "Configuration error: CopyParallelism must be greater than 0" << std::endl;
+            return std::nullopt;
+        }
+        if (options.CopyChanSize <= 0)
+        {
+            std::cerr << "Configuration error: CopyChanSize must be greater than 0" << std::endl;
+            return std::nullopt;
+        }
+
+        return options;
+    }
+    catch (const json::exception &e)
+    {
+        std::cerr << "Configuration error in " << config_path << ": " << e.what() << std::endl;
+        return std::nullopt;
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Configuration error in " << config_path << ": " << e.what() << std::endl;
+        return std::nullopt;
+    }
+}
+
 std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
 {
     std::shared_ptr<ILogger> myLogger;
     if (options.LogMode == "file")
     {
-        auto logger = spdlog::basic_logger_mt("file", options.LogFilePath);
+        auto logger = spdlog::get("file");
+        if (!logger)
+        {
+            logger = spdlog::basic_logger_mt("file", options.LogFilePath);
+        }
         logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
-        myLogger = std::make_shared<SpdLogger>(spdlog::get("file"));
+        myLogger = std::make_shared<SpdLogger>(logger);
         myLogger->set_level(options.LogLevel);
         return myLogger;
     }
     else
     {
-        auto logger = spdlog::stdout_color_mt("console");
+        auto logger = spdlog::get("console");
+        if (!logger)
+        {
+            logger = spdlog::stdout_color_mt("console");
+        }
         logger->set_level(spdlog::level::from_str("trace")); // must set to trace to allow our ILogger to filter
-        myLogger = std::make_shared<SpdLogger>(spdlog::get("console"));
+        myLogger = std::make_shared<SpdLogger>(logger);
         myLogger->set_level(options.LogLevel);
         return myLogger;
     }

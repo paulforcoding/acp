@@ -1,77 +1,8 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <filesystem>
 #include <algorithm>
 #include "lib/mainlib.hpp"
-
-std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
-{
-    std::ifstream f(config_path);
-    if (!f.is_open())
-    {
-        return std::nullopt;
-    }
-
-    using json = nlohmann::json;
-    try
-    {
-        json data = json::parse(f);
-
-        RWCombinedCopyOptions options;
-
-        auto copyOpts = data.at("CopyOptions");
-        options.IoSize = copyOpts.at("IOSize").get<size_t>();
-        options.QueueDepth = copyOpts.at("QueueDepth").get<size_t>();
-        options.Batch = copyOpts.at("Batch").get<int>();
-        options.IOReapWait = copyOpts.at("IOReapWait").get<int>();
-
-        options.LogLevel = data.at("LogLevel").get<std::string>();
-        options.LogMode = data.at("LogMode").get<std::string>();
-        options.LogFilePath = data.value("LogFilePath", std::string());
-        options.CopyEngine = data.at("CopyEngine").get<std::string>();
-        options.CopyMode = data.at("CopyMode").get<std::string>();
-        options.CksumAlgorithm = data.value("CksumAlgorithm", std::string("xxhash64"));
-        options.CopyParallelism = data.at("CopyParallelism").get<int>();
-        options.CopyChanSize = data.at("CopyChanSize").get<int>();
-        options.DirectIO = data.value("DirectIO", false);
-        options.EnableInotify = data.value("EnableInotify", false);
-        options.PreserveSparseFiles = data.value("PreserveSparseFiles", false);
-
-        if (options.IoSize == 0)
-        {
-            std::cerr << "Configuration error: IOSize must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.QueueDepth == 0)
-        {
-            std::cerr << "Configuration error: QueueDepth must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.CopyParallelism <= 0)
-        {
-            std::cerr << "Configuration error: CopyParallelism must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.CopyChanSize <= 0)
-        {
-            std::cerr << "Configuration error: CopyChanSize must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-
-        return options;
-    }
-    catch (const json::exception &e)
-    {
-        std::cerr << "Configuration error in " << config_path << ": " << e.what() << std::endl;
-        return std::nullopt;
-    }
-    catch (const std::exception &e)
-    {
-        std::cerr << "Configuration error in " << config_path << ": " << e.what() << std::endl;
-        return std::nullopt;
-    }
-}
 
 int main(int argc, char *argv[])
 {

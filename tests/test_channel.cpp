@@ -71,3 +71,57 @@ TEST_CASE("InotifyChannel deduplication and pop", "[inotify]")
     REQUIRE(r2.has_value());
     REQUIRE(r2.value() == "fileA");
 }
+
+TEST_CASE("Channel Size concurrent", "[channel][thread]")
+{
+    constexpr int kCapacity = 64;
+    constexpr int kTotalItems = 2000;
+    Channel<Dummy> ch(kCapacity);
+    std::atomic<int> pushed{0};
+    std::atomic<int> popped{0};
+    std::atomic<bool> done{false};
+
+    std::thread producer([&]()
+                         {
+        for (int i = 0; i < kTotalItems; ++i)
+        {
+            auto item = std::make_unique<Dummy>(i);
+            ch.Push(item);
+            pushed.fetch_add(1);
+        }
+        done.store(true);
+    });
+
+    std::thread consumer([&]()
+                         {
+        while (popped.load() < kTotalItems || !done.load())
+        {
+            auto res = ch.Pop();
+            if (res.has_value())
+            {
+                popped.fetch_add(1);
+            }
+        }
+    });
+
+    // Third thread continuously calls Size() while producer/consumer are active
+    std::thread sizer([&]()
+                      {
+        int size_call_count = 0;
+        while (popped.load() < kTotalItems || !done.load())
+        {
+            int sz = ch.Size();
+            REQUIRE(sz >= 0);
+            REQUIRE(sz <= kCapacity);
+            ++size_call_count;
+        }
+    });
+
+    producer.join();
+    consumer.join();
+    sizer.join();
+
+    REQUIRE(pushed == kTotalItems);
+    REQUIRE(popped == kTotalItems);
+    REQUIRE(ch.Size() == 0);
+}
