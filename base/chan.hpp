@@ -7,6 +7,8 @@
 #include <queue>
 #include <atomic>
 #include <unordered_set>
+#include <list>
+#include <chrono>
 
 class CondVarGuard
 {
@@ -229,4 +231,45 @@ public:
     {
         return mList;
     }
+};
+
+class CPFilePair;
+
+// 专用于 CPFilePairMgr 的文件对通道
+// 管理 CPFilePair 从"待读"→"读完成等写"→"全部完成"的完整生命周期
+class FPChannel
+{
+public:
+    FPChannel() = default;
+
+    // === 生产者 ===
+    void Push(std::shared_ptr<CPFilePair> item);
+    void Close(); // 标记关闭，唤醒所有等待线程
+
+    // === 消费者：读取阶段 ===
+    std::shared_ptr<CPFilePair> PeekFront(); // 查看队首（不弹出），空返回 nullptr
+    void PopFront();                         // 确认队首处理完毕，弹出
+
+    // === 消费者：状态转换 ===
+    void MoveToInflight(std::shared_ptr<CPFilePair> pFP);      // pending → inflight
+    void RemoveFromInflight(std::shared_ptr<CPFilePair> pFP);  // inflight → 完成
+
+    // === 阻塞等待 ===
+    // 返回 true：有新工作来了或还有 inflight，继续干活
+    // 返回 false：通道已关闭且没有待读/无 inflight，该退出了
+    bool WaitForWorkOrClose(std::chrono::milliseconds timeout);
+
+    // === 查询 ===
+    bool HasPendingWork() const; // pending 非空 或 inflight 非空
+    bool Empty() const;           // pending 为空
+    bool IsClosed() const;
+    size_t PendingCount() const;
+    size_t InflightCount() const;
+
+private:
+    mutable std::mutex mMutex;
+    std::condition_variable mCv;
+    std::deque<std::shared_ptr<CPFilePair>> mPending;
+    std::list<std::shared_ptr<CPFilePair>> mInflight;
+    bool mClosed = false;
 };

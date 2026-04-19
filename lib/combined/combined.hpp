@@ -125,6 +125,11 @@ public:
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
 
+    void MarkAsInflight() { mIsInflight = true; }
+    bool IsInflight() const { return mIsInflight; }
+    void MarkAsCompleted() { mIsCompleted = true; }
+    bool IsCompleted() const { return mIsCompleted; }
+
 private:
     int mSrcFd = -1;
     int mDstFd = -1;
@@ -145,126 +150,48 @@ private:
 
     bool mIsChksumError = false;
 
+    bool mIsInflight = false;
+    bool mIsCompleted = false;
+
     std::shared_ptr<ILogger> mLogger;
 };
 
 class CPFilePairMgr
 {
 public:
-    // make sure at lease we got one elem in mFilePairs
     CPFilePairMgr(const RWCombinedCopyOptions &options,
                   std::shared_ptr<ILogger> logger)
-        : mOptions(options), mLogger(logger)
-    {
-        mReadPtr = mFilePairs.begin();
-    }
+        : mOptions(options), mLogger(logger) {}
 
     tl::expected<void, StackError> AddFilePair(std::string_view src_path, std::string_view dst_path)
     {
-        std::lock_guard<std::mutex> lock(mMutex);
-        mFilePairs.push_back(
-            std::make_shared<CPFilePair>(src_path,
-                                         dst_path,
-                                         mOptions.IoSize,
-                                         mOptions.DirectIO,
-                                         mOptions.SyncWrites,
-                                         (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
-                                         mLogger));
-        if (mFilePairs.size() == 1) // 下面的动作只在第一个文件对加入时执行
-        {
-            mReadPtr = mFilePairs.begin();
-            mStartFlag.store(true);
-        }
-
+        mChannel.Push(std::make_shared<CPFilePair>(src_path,
+                       dst_path,
+                       mOptions.IoSize,
+                       mOptions.DirectIO,
+                       mOptions.SyncWrites,
+                       (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
+                       mLogger));
         return {};
     }
 
     tl::expected<std::shared_ptr<CPFilePair>, StackError> GetNextReadIO();
-    tl::expected<void, StackError> CheckWriteComplete(std::shared_ptr<CPFilePair> writeIt);
+    tl::expected<void, StackError> CheckWriteComplete(std::shared_ptr<CPFilePair> pFP);
     tl::expected<void, StackError> CheckReadComplete(std::shared_ptr<CPFilePair> pFP);
 
-    void SetStopFlag()
-    {
-        mStopFlag.store(true);
-    }
+    void SetStopFlag() { mChannel.Close(); }
 
-    bool ShouldStartCopy()
-    {
-        return mStartFlag.load();
-    }
-    bool ShouldStopCopy()
-    {
-        std::lock_guard<std::mutex> lock(mMutex);
-        auto should = (mStopFlag.load() &&
-                       mReadPtr == mFilePairs.end() &&
-                       mFilePairs.empty() &&
-                       mInflightFPs.Empty());
-        if (!should)
-        {
-            mLogger->debug("ShouldStopCopy() == false: StopFlag: {}, ReadPtr at end: {}, StartFlag: {}, FilePairs empty: {}, InflightFPs empty: {}",
-                           mStopFlag.load(),
-                           (mReadPtr == mFilePairs.end()) ? "true" : "false",
-                           mStartFlag.load(),
-                           mFilePairs.empty() ? "true" : "false",
-                           mInflightFPs.Empty() ? "true" : "false");
-
-            if (mReadPtr != mFilePairs.end())
-            {
-                // print info about remaining file pairs
-                mLogger->debug("Remaining file pairs to read:");
-                for (auto it = mReadPtr; it != mFilePairs.end(); ++it)
-                {
-                    mLogger->debug("  src: {}, dst: {}", (*it)->GetSrcPath(), (*it)->GetDstPath());
-                }
-            }
-
-            if (!mInflightFPs.Empty())
-            {
-                mLogger->debug("Inflight file pairs:");
-                for (const auto &fp : mInflightFPs.GetList())
-                {
-                    mLogger->debug("  src: {}, dst: {}, read_offset: {}, write_offset: {}",
-                                   fp->GetSrcPath(), fp->GetDstPath(),
-                                   fp->GetReadOffset(), fp->GetWriteOffset());
-                }
-            }
-        }
-        return should;
-    }
+    bool HasPendingWork() { return mChannel.HasPendingWork(); }
+    bool WaitForWorkOrClose(std::chrono::milliseconds timeout) { return mChannel.WaitForWorkOrClose(timeout); }
+    bool IsStopRequested() { return mChannel.IsClosed(); }
 
 private:
     tl::expected<bool, StackError> CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP);
-    void ReadPtrAdvance(std::shared_ptr<CPFilePair> pFP)
-    {
-        assert(pFP == *mReadPtr);
-        if (mReadPtr != mFilePairs.end())
-        {
-            mLogger->debug("ReadPtrAdvance(): advanced from : {}",
-                           (*mReadPtr)->GetSrcPath());
-        }
-
-        mFilePairs.erase(mReadPtr); // mReadPtr指向的元素被移除后，mReadPtr就不再准确了，需要重新指向begin()
-        mReadPtr = mFilePairs.begin();
-
-        if (mReadPtr != mFilePairs.end())
-        {
-            mLogger->debug("ReadPtrAdvance(): advanced to : {}",
-                           (*mReadPtr)->GetSrcPath());
-        }
-    }
 
 private:
-    std::list<std::shared_ptr<CPFilePair>> mFilePairs;
-    DedupList<CPFilePair> mInflightFPs;
-
     RWCombinedCopyOptions mOptions;
-    std::mutex mMutex; // to protect mFilePairs, mReadPtr, mWritePtr in multithreaded scenarios
-    std::list<std::shared_ptr<CPFilePair>>::iterator mReadPtr;
-
-    std::atomic_bool mStartFlag = false; // whether file pairs have been filled
-    std::atomic_bool mStopFlag = false;
-
     std::shared_ptr<ILogger> mLogger;
+    FPChannel mChannel;
 };
 
 class IOSlot
@@ -527,16 +454,6 @@ public:
 
     tl::expected<void, StackError> RunQueue()
     {
-        while (!mCPFPMgr->ShouldStartCopy())
-        {
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            if (mCPFPMgr->ShouldStopCopy())
-            {
-                mLogger->debug("Received stop signal before starting copy queue.");
-                return {};
-            }
-        }
-
         auto init_res = Init();
         if (!init_res)
         {
@@ -544,34 +461,36 @@ public:
         }
 
         long round = 0;
-        while (!mCPFPMgr->ShouldStopCopy())
+        while (true)
         {
             mLogger->debug("Starting IO round: {}", round);
 
 #ifndef NDEBUG
             auto start = std::chrono::high_resolution_clock::now();
-            auto submit_res = SubmitReads();
+            auto read_submitted = SubmitReads();
             auto end = std::chrono::high_resolution_clock::now();
             AddDuration("SubmitReads()", start, end);
 #else
-            auto submit_res = SubmitReads();
+            auto read_submitted = SubmitReads();
 #endif
 
-            if (!submit_res)
+            if (!read_submitted)
             {
-                return tl::unexpected(StackError("SubmitReads(), err: ", submit_res.error()));
+                return tl::unexpected(StackError("SubmitReads(), err: ", read_submitted.error()));
             }
 
-            mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
+            mLogger->debug("Submitted {} read IOs in round: {}.", read_submitted.value(), round);
 
+            int cksum_submitted = 0;
             if (mCksumQueue.size() > 0)
             {
-                auto submit_res = SubmitCksumReads();
-                if (!submit_res)
+                auto cksum_res = SubmitCksumReads();
+                if (!cksum_res)
                 {
-                    return tl::unexpected(StackError("SubmitCksumReads(), err: ", submit_res.error()));
+                    return tl::unexpected(StackError("SubmitCksumReads(), err: ", cksum_res.error()));
                 }
-                mLogger->debug("Submitted {} checksum read IOs in round: {}.", submit_res.value(), round);
+                cksum_submitted = cksum_res.value();
+                mLogger->debug("Submitted {} checksum read IOs in round: {}.", cksum_submitted, round);
             }
 
             auto reap_res = IOReap();
@@ -580,6 +499,7 @@ public:
                 return tl::unexpected(StackError("IOReap(), err: ", reap_res.error()));
             }
 
+            int write_submitted = 0;
             if (mOptions.CopyMode != "CksumOnly")
             {
                 auto write_res = SubmitWrites();
@@ -587,7 +507,16 @@ public:
                 {
                     return tl::unexpected(StackError("SubmitWrites(), err: ", write_res.error()));
                 }
-                mLogger->debug("Submitted {} write IOs in round: {}.", write_res.value(), round);
+                write_submitted = write_res.value();
+                mLogger->debug("Submitted {} write IOs in round: {}.", write_submitted, round);
+            }
+
+            if (read_submitted.value() == 0 && write_submitted == 0 && cksum_submitted == 0)
+            {
+                if (!mCPFPMgr->WaitForWorkOrClose(std::chrono::milliseconds(100)))
+                {
+                    break;
+                }
             }
 
             round++;
@@ -618,7 +547,7 @@ protected:
             }
         }
 
-        if (isStuck && !mCPFPMgr->ShouldStopCopy() && !mOptions.EnableInotify)
+        if (isStuck && !mCPFPMgr->IsStopRequested() && !mOptions.EnableInotify)
         {
             mLogger->warn("Detected stuck AIO operations.");
             return tl::unexpected(StackError("Detected stuck AIO operations."));

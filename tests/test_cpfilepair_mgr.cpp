@@ -19,7 +19,7 @@ static void write_file(const fs::path &p, const std::string &content)
     ofs.write(content.data(), static_cast<std::streamsize>(content.size()));
 }
 
-TEST_CASE("CPFilePairMgr ShouldStartCopy after AddFilePair", "[cpfilepairmgr]")
+TEST_CASE("CPFilePairMgr PeekFront after AddFilePair", "[cpfilepairmgr]")
 {
     auto logger = std::make_shared<ConsoleLogger>();
     RWCombinedCopyOptions opts;
@@ -28,11 +28,13 @@ TEST_CASE("CPFilePairMgr ShouldStartCopy after AddFilePair", "[cpfilepairmgr]")
     opts.SyncWrites = false;
 
     CPFilePairMgr mgr(opts, logger);
-    REQUIRE_FALSE(mgr.ShouldStartCopy());
+    // Before AddFilePair, channel is empty but not closed
+    REQUIRE(mgr.IsStopRequested() == false);
 
     auto add_res = mgr.AddFilePair("/tmp/a", "/tmp/b");
     REQUIRE(add_res.has_value());
-    REQUIRE(mgr.ShouldStartCopy());
+    // After AddFilePair, HasPendingWork should be true
+    REQUIRE(mgr.HasPendingWork());
 }
 
 TEST_CASE("CPFilePairMgr GetNextReadIO single file", "[cpfilepairmgr]")
@@ -82,7 +84,7 @@ TEST_CASE("CPFilePairMgr GetNextReadIO returns null at end", "[cpfilepairmgr]")
     REQUIRE(next.value() == nullptr);
 }
 
-TEST_CASE("CPFilePairMgr ShouldStopCopy all conditions", "[cpfilepairmgr]")
+TEST_CASE("CPFilePairMgr WaitForWorkOrClose lifecycle", "[cpfilepairmgr]")
 {
     auto logger = std::make_shared<ConsoleLogger>();
     RWCombinedCopyOptions opts;
@@ -91,26 +93,20 @@ TEST_CASE("CPFilePairMgr ShouldStopCopy all conditions", "[cpfilepairmgr]")
     opts.SyncWrites = false;
 
     CPFilePairMgr mgr(opts, logger);
-    // None of the conditions met
-    REQUIRE_FALSE(mgr.ShouldStopCopy());
+    // Empty and not closed: should wait then return true (timeout)
+    REQUIRE(mgr.WaitForWorkOrClose(std::chrono::milliseconds(10)));
 
     mgr.SetStopFlag();
-    // Still false: no file pairs added, StartFlag is false
-    REQUIRE_FALSE(mgr.ShouldStopCopy());
+    // Empty and closed: should return false immediately
+    REQUIRE_FALSE(mgr.WaitForWorkOrClose(std::chrono::milliseconds(10)));
 
-    auto add_res = mgr.AddFilePair("/tmp/a", "/tmp/b");
+    // Reset for next test: add a file pair before closing
+    CPFilePairMgr mgr2(opts, logger);
+    auto add_res = mgr2.AddFilePair("/tmp/a", "/tmp/b");
     REQUIRE(add_res.has_value());
-    mgr.SetStopFlag();
-    // Still false: readPtr not at end, filePairs not empty
-    REQUIRE_FALSE(mgr.ShouldStopCopy());
-
-    // Simulate consuming all file pairs
-    auto next = mgr.GetNextReadIO();
-    REQUIRE(next.has_value());
-    // After getting next, readPtr may have moved; need to drain it
-    // This file doesn't exist, so CheckAndInit fails and it advances
-    // Now filePairs should be empty and readPtr at end
-    REQUIRE(mgr.ShouldStopCopy());
+    mgr2.SetStopFlag();
+    // Pending work exists but closed: should return true (has pending)
+    REQUIRE(mgr2.WaitForWorkOrClose(std::chrono::milliseconds(10)));
 }
 
 TEST_CASE("CPFilePairMgr CheckWriteComplete with finished file", "[cpfilepairmgr]")

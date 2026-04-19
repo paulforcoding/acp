@@ -162,75 +162,55 @@ tl::expected<void, std::string> CPFilePair::DoDstState()
 
 tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextReadIO()
 {
-    std::lock_guard<std::mutex> lock(mMutex);
-
-AGAIN:
-    if (mReadPtr == mFilePairs.end())
+    while (true)
     {
-        mLogger->trace("GetNextReadIO() ended");
-        return nullptr; // already at end
-    }
-    // now mReadPtr points to a valid file pair
-
-    if (!(*mReadPtr)->IsInitialized())
-    {
-        auto init_res = (*mReadPtr)->CheckAndInit();
-        if (!init_res)
+        auto front = mChannel.PeekFront();
+        if (!front)
         {
-            // 不支持的文件类型，简单跳过
-            if (init_res.error().Code() == ENOTSUP)
-            {
-                mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
-                              (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), init_res.error().ToString());
-                ReadPtrAdvance(*mReadPtr);
-                goto AGAIN;
-            }
-            init_res.error().Append("(*mReadPtr)->CheckAndInit(), err: ");
-            return Unexpt(init_res.error());
+            mLogger->trace("GetNextReadIO() ended");
+            return nullptr;
         }
+
+        if (!front->IsInitialized())
+        {
+            auto init_res = front->CheckAndInit();
+            if (!init_res)
+            {
+                if (init_res.error().Code() == ENOTSUP)
+                {
+                    mLogger->warn("Skipping unsupported file pair, src: {}, dst: {}. Error: {}",
+                                  front->GetSrcPath(), front->GetDstPath(), init_res.error().ToString());
+                    mChannel.PopFront();
+                    continue;
+                }
+                init_res.error().Append("front->CheckAndInit(), err: ");
+                return Unexpt(init_res.error());
+            }
+        }
+
+        if (front->IsDir() || front->IsSymlink())
+        {
+            mChannel.PopFront();
+            continue;
+        }
+
+        auto read_complete_res = CheckReadCompleteNoLock(front);
+        if (!read_complete_res)
+        {
+            return tl::unexpected(read_complete_res.error());
+        }
+        if (read_complete_res.value())
+        {
+            continue;
+        }
+        mLogger->trace("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
+                       front->GetSrcPath(), front->GetDstPath(), front->GetReadOffset());
+        return front;
     }
-
-    if ((*mReadPtr)->IsDir() || (*mReadPtr)->IsSymlink())
-    {
-        // CheckAndInit()已经处理好了目录和Symlink，这里直接跳过
-
-        // namespace fs = std::filesystem;
-        // // make dirs at dest, return error if failed
-        // mLogger->trace("mkdir for src: {}, dst: {}",
-        //                (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath());
-
-        // std::error_code ec;
-        // fs::create_directories((*mReadPtr)->GetDstPath(), ec);
-        // if (ec)
-        // {
-        //     return tl::unexpected(StackError(
-        //         fmt::format("Failed to create destination directory: {}, errstr: {}",
-        //                     (*mReadPtr)->GetDstPath(), ec.message())));
-        // }
-
-        // TODO: call CheckWriteComplete(mReadPtr) in future to 统一做copy收尾工作
-
-        ReadPtrAdvance(*mReadPtr);
-        goto AGAIN;
-    }
-
-    auto read_complete_res = CheckReadCompleteNoLock(*mReadPtr);
-    if (!read_complete_res)
-    {
-        return tl::unexpected(read_complete_res.error());
-    }
-    if (read_complete_res.value())
-    {
-        goto AGAIN;
-    }
-    mLogger->trace("GetNextReadIO() return, src: {}, dst: {}, read offset: {}",
-                   (*mReadPtr)->GetSrcPath(), (*mReadPtr)->GetDstPath(), (*mReadPtr)->GetReadOffset());
-    return *mReadPtr;
 }
 
 tl::expected<void, StackError> CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
 {
-    std::lock_guard<std::mutex> lock(mMutex);
     auto res = CheckReadCompleteNoLock(pFP);
     if (!res)
     {
@@ -247,13 +227,12 @@ tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::share
 
     if (pFP->IsReadFinished())
     {
-        mInflightFPs.Push(pFP, pFP->GetSrcPath());
+        mChannel.MoveToInflight(pFP);
 
-        // 如果是0-size文件，它是(*mReadPtr)->IsInitialized()==true的，说明是经由AGAIN标签过来的
-        if ((pFP)->IsInitialized() && (pFP)->GetSrcFileSize() == 0)
+        if (pFP->IsInitialized() && pFP->GetSrcFileSize() == 0)
         {
             mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
-                           (pFP)->GetSrcPath(), (pFP)->GetDstPath());
+                           pFP->GetSrcPath(), pFP->GetDstPath());
             auto write_res = CheckWriteComplete(pFP);
             if (!write_res)
             {
@@ -261,7 +240,6 @@ tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::share
             }
         }
 
-        ReadPtrAdvance(pFP);
         return true;
     }
     return false;
@@ -292,22 +270,96 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
             }
         }
 
-        // 如果有其他结尾要做的事情，比如copy file attributes，可以在这里做
+        mChannel.RemoveFromInflight(pFP);
 
         mLogger->debug("Completed writing file pair: src: {}, dst: {}, size: {}, inflight pairs remaining: {}",
-                       pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mInflightFPs.Size());
-        if (mInflightFPs.Size() > 0)
-        {
-            mLogger->debug("Inflight file pairs:");
-            for (const auto &fp : mInflightFPs.GetList())
-            {
-                mLogger->debug("  src: {}, dst: {}, read_offset: {}, write_offset: {}",
-                               fp->GetSrcPath(), fp->GetDstPath(),
-                               fp->GetReadOffset(), fp->GetWriteOffset());
-            }
-        }
-        // 从inflight列表中移除
-        mInflightFPs.Remove(pFP, pFP->GetSrcPath());
+                       pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), mChannel.InflightCount());
     }
     return {};
+}
+
+// === FPChannel 实现 ===
+
+void FPChannel::Push(std::shared_ptr<CPFilePair> item)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    mPending.push_back(std::move(item));
+    mCv.notify_one();
+}
+
+void FPChannel::Close()
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    mClosed = true;
+    mCv.notify_all();
+}
+
+std::shared_ptr<CPFilePair> FPChannel::PeekFront()
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    if (mPending.empty())
+        return nullptr;
+    return mPending.front();
+}
+
+void FPChannel::PopFront()
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    assert(!mPending.empty());
+    mPending.pop_front();
+}
+
+void FPChannel::MoveToInflight(std::shared_ptr<CPFilePair> pFP)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    assert(!mPending.empty() && mPending.front() == pFP);
+    mPending.pop_front();
+    mInflight.push_back(pFP);
+    pFP->MarkAsInflight();
+}
+
+void FPChannel::RemoveFromInflight(std::shared_ptr<CPFilePair> pFP)
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    mInflight.remove(pFP);
+    pFP->MarkAsCompleted();
+    mCv.notify_all();
+}
+
+bool FPChannel::WaitForWorkOrClose(std::chrono::milliseconds timeout)
+{
+    std::unique_lock<std::mutex> lock(mMutex);
+    mCv.wait_for(lock, timeout, [this]
+                 { return mClosed || !mPending.empty(); });
+    return !(mClosed && mPending.empty() && mInflight.empty());
+}
+
+bool FPChannel::HasPendingWork() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return !mPending.empty() || !mInflight.empty();
+}
+
+bool FPChannel::Empty() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mPending.empty();
+}
+
+bool FPChannel::IsClosed() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mClosed;
+}
+
+size_t FPChannel::PendingCount() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mPending.size();
+}
+
+size_t FPChannel::InflightCount() const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    return mInflight.size();
 }
