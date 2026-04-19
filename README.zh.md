@@ -154,6 +154,24 @@ rm -rf build                         # 完全清理
 
 复制目录到目录时，`acp` 会在目标目录内创建与源目录同名的子目录。
 
+## 适用场景 / 不适用场景
+
+### 推荐使用 `acp`
+
+- **大规模数据迁移** — 复制数百万文件或 TB 级数据集。异步 I/O 引擎和多线程流水线摊平启动开销，充分饱和存储带宽。
+- **超大单文件** — 顺序读写多 GB 文件，队列深度和并行度是关键。
+- **校验和增量同步** — `CksumCopy` / `CksumOnly` 实现块级去重，适合大部分数据未变更的场景。
+- **持续复制** — `EnableInotify` 实时监控源目录变化，保持目标端同步。
+- **高带宽本地存储** — NVMe SSD、RAID 阵列或高速网络存储，`cp` 会成为 I/O 瓶颈的场景。
+
+### 不推荐使用 `acp`
+
+- **小文件、偶发复制** — 几个 KB 或少量文件时，原生 `cp` 更快，因为 `acp` 有 JSON 配置解析和线程池启动开销。
+- **跨网络复制** — `acp` 是纯本地文件复制工具，不支持 `scp`、`rsync`、`sftp` 或任何网络协议。
+- **特殊文件复制** — 设备文件、socket、FIFO、whiteout 文件会被跳过（日志记录为 unsupported）。如需复制这些文件，请使用 `cp -a` 或 `rsync`。
+- **精确元数据保留** — `acp` 不保留时间戳、权限、ACL 或扩展属性（`xattr`）。它追求吞吐量，而非归档级 fidelity。
+- **交互式或脚本化的单文件操作** — 需要 `cp` 的简洁性和立即退出语义的场景。
+
 ## 复制模式说明
 
 ### CopyOnly
@@ -229,6 +247,15 @@ main.cpp
 - **Direct I/O** 对大顺序工作负载有益，但需要扇区对齐的 I/O 大小。
 - 对高 IOPS 存储（NVMe SSD、RAID 阵列）增加 `QueueDepth` 和 `CopyParallelism`。
 - `CksumCopy` 会在目标端增加读放大；仅在写带宽为瓶颈时使用。
+
+### macOS GCD 后端说明
+
+macOS 后端使用 **Grand Central Dispatch (GCD)**，通过 `dispatch_group_async` + `pread`/`pwrite` 来**模拟**异步 I/O。与 Linux 的 `io_uring` 或 `libaio`（在内核态排队和完成 I/O 请求）不同，GCD 是将阻塞式系统调用分发到线程池中执行。这意味着：
+
+- macOS 后端是**"伪异步"** — 通过线程实现并发，而非真正的内核异步 I/O。
+- 对大顺序复制场景，吞吐量可能与 Linux 相当，但**延迟和 CPU 开销更高**，因为需要线程管理。
+- 在 macOS 上，`acp` 相对 `cp` 的性能提升**不如 Linux 上 io_uring 的提升那么显著**。
+- 如果在 macOS 上追求最大吞吐量，可考虑使用 `rsync` 或支持 APFS clone 复制的 `cp -c`。
 
 ## 许可证
 

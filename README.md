@@ -154,6 +154,24 @@ Example `acp_config.json`:
 
 When copying a directory to a directory, `acp` creates a subdirectory inside the destination with the same name as the source directory.
 
+## When to Use / When NOT to Use
+
+### Use `acp` when
+
+- **Large-scale data migration** — copying millions of files or terabyte-scale datasets. The async I/O engine and multi-threaded pipeline amortize the fixed startup cost and saturate storage bandwidth.
+- **Very large single files** — sequential read/write of multi-GB files where queue depth and parallelism matter.
+- **Incremental sync with checksums** — `CksumCopy` / `CksumOnly` for block-level deduplication when most data is unchanged.
+- **Continuous replication** — `EnableInotify` keeps destination in sync with source changes in real time.
+- **High-bandwidth local storage** — NVMe SSDs, RAID arrays, or fast network-attached storage where `cp` becomes I/O-bound.
+
+### Do NOT use `acp` when
+
+- **Small, one-off copies** — for a few KB or a handful of files, native `cp` is faster because `acp` has JSON parsing and thread-pool startup overhead.
+- **Cross-network copies** — `acp` is a pure local-file copy tool. It does not speak `scp`, `rsync`, `sftp`, or any network protocol.
+- **Special file replication** — device files, sockets, FIFOs, and whiteout files are skipped (logged as unsupported). Use `cp -a` or `rsync` if you need these.
+- **Precise metadata preservation** — `acp` does not preserve timestamps, permissions, ACLs, or extended attributes (`xattr`). It focuses on throughput, not archive fidelity.
+- **Interactive or scripted single-file operations** — where `cp` simplicity and immediate exit semantics are preferred.
+
 ## Copy Modes Explained
 
 ### CopyOnly
@@ -229,6 +247,15 @@ main.cpp
 - **Direct I/O** is beneficial for large sequential workloads but requires sector-aligned I/O sizes.
 - Increase `QueueDepth` and `CopyParallelism` for high-IOPS storage (NVMe SSDs, RAID arrays).
 - `CksumCopy` adds read amplification on the destination side; use when write bandwidth is the bottleneck.
+
+### macOS GCD Backend Caveat
+
+The macOS backend uses **Grand Central Dispatch (GCD)** with `dispatch_group_async` + `pread`/`pwrite` to *emulate* asynchronous I/O. Unlike Linux `io_uring` or `libaio`, which queue and complete I/O requests inside the kernel, GCD dispatches blocking syscalls to a thread pool. This means:
+
+- The macOS backend is **"pseudo-async"** — it achieves concurrency through threads, not true async I/O.
+- For large sequential copies, throughput may be comparable to Linux, but **latency and CPU overhead are higher** due to thread management.
+- On macOS, `acp` will not outperform `cp` as dramatically as `io_uring` does on Linux.
+- If maximum throughput on macOS is critical, consider using `rsync` or `cp` with APFS clone copies (`cp -c`) instead.
 
 ## License
 
