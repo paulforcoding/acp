@@ -36,7 +36,6 @@
 *.exe
 *.out
 *.app
-acp
 
 # debug information files
 *.dwo
@@ -71,6 +70,7 @@ compile_commands.json
 # bin output
 build/
 cmake-build-*/
+.acp_state.json
 
 # CMake
 CMakeCache.txt
