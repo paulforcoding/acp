@@ -592,9 +592,7 @@ tl::expected<void, StackError> CPFilePair::PreserveAcl()
     if (mSrcFd < 0 || mDstFd < 0)
         return {};
 
-    acl_t acl = acl_get_fd(mSrcFd, ACL_TYPE_ACCESS);
-    if (!acl)
-        acl = acl_get_fd(mSrcFd, ACL_TYPE_DEFAULT);
+    acl_t acl = acl_get_fd(mSrcFd);
     if (!acl)
         return {};
 
@@ -899,7 +897,7 @@ tl::expected<void, StackError> CPFilePair::CompareAcl(const struct stat &dstStat
     if (mSrcFd < 0)
         return {};
 
-    acl_t srcAcl = acl_get_fd(mSrcFd, ACL_TYPE_ACCESS);
+    acl_t srcAcl = acl_get_fd(mSrcFd);
     if (!srcAcl)
         return {};
 
@@ -910,7 +908,7 @@ tl::expected<void, StackError> CPFilePair::CompareAcl(const struct stat &dstStat
     char *dstText = nullptr;
     if (mDstFd >= 0)
     {
-        dstAcl = acl_get_fd(mDstFd, ACL_TYPE_ACCESS);
+        dstAcl = acl_get_fd(mDstFd);
     }
     if (!dstAcl)
     {
