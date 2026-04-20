@@ -37,12 +37,11 @@ endif()
 # ---------------------------------------------------------------------------
 if(BUILD_STATIC)
     if(PLATFORM_LINUX)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++ -static")
-        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+        # Static-link libgcc/libstdc++ but keep glibc dynamic (system ABI guarantee).
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -static-libgcc -static-libstdc++")
     elseif(PLATFORM_MACOS)
         # macOS does not support -static for executables.
-        # Prefer static archives for third-party libs; system frameworks remain dynamic.
-        set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+        # System frameworks remain dynamic.
     endif()
 endif()
 
@@ -57,8 +56,12 @@ find_path(SPDLOG_INCLUDE_DIR spdlog/spdlog.h REQUIRED)
 # Required: fmt (header-only usage via FMT_HEADER_ONLY in source)
 find_path(FMT_INCLUDE_DIR fmt/format.h REQUIRED)
 
-# Required: OpenSSL
+# Required: OpenSSL (keep dynamic: OL9/RHEL9 do not ship static libs)
 find_package(OpenSSL REQUIRED)
+
+# Note: OL9/RHEL9 do not ship static archives for many libs (openssl, libaio).
+# We rely on the linker flags (-static-libgcc -static-libstdc++) to static-link
+# the C++ runtime only; third-party libs are resolved normally (shared preferred).
 
 # Required: xxhash (prefer pkg-config, fallback to find_library)
 find_package(PkgConfig)
@@ -125,7 +128,7 @@ endif()
 # ---------------------------------------------------------------------------
 function(apply_static_link_flags target)
     if(BUILD_STATIC AND PLATFORM_LINUX)
-        target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++ -static)
+        target_link_options(${target} PRIVATE -static-libgcc -static-libstdc++)
     endif()
 endfunction()
 
@@ -148,6 +151,9 @@ target_link_libraries(acp
         OpenSSL::Crypto
         Threads::Threads
 )
+
+# OL9 spdlog package lacks bundled fmt; force external fmt
+target_compile_definitions(acp PRIVATE SPDLOG_FMT_EXTERNAL)
 
 # xxhash
 target_include_directories(acp PRIVATE ${XXHASH_INCLUDE_DIRS})
@@ -221,6 +227,8 @@ if(BUILD_TESTS)
             OpenSSL::Crypto
             Threads::Threads
     )
+
+    target_compile_definitions(test_acp PRIVATE SPDLOG_FMT_EXTERNAL)
 
     target_include_directories(test_acp PRIVATE ${XXHASH_INCLUDE_DIRS})
     target_link_directories(test_acp PRIVATE ${XXHASH_LIBRARY_DIRS})

@@ -1,3 +1,4 @@
+#define _GNU_SOURCE
 #include <filesystem>
 #include <set>
 #include <sys/xattr.h>
@@ -463,11 +464,7 @@ tl::expected<void, StackError> CPFilePair::PreserveTimestamps()
     int rc;
     if (mIsSymlink)
     {
-#ifdef __APPLE__
         rc = utimensat(AT_FDCWD, mDstPath.c_str(), times, AT_SYMLINK_NOFOLLOW);
-#else
-        rc = lutimens(mDstPath.c_str(), times);
-#endif
     }
     else if (mDstFd >= 0)
     {

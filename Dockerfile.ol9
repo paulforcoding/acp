@@ -16,6 +16,7 @@ RUN dnf install -y \
     openssl-devel \
     xxhash-devel \
     liburing-devel \
+    libstdc++-static \
     pkgconfig \
     && dnf clean all
 
