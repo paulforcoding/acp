@@ -107,6 +107,7 @@ set(COMMON_SOURCES
     main.cpp
     lib/mainlib.cpp
     base/base.cpp
+    base/chan.cpp
     lib/combined/combined.cpp
 )
 
