@@ -1,4 +1,5 @@
 #include <filesystem>
+#include <set>
 #include <sys/xattr.h>
 #include "base/event_reporter.hpp"
 #include "lib/combined/combined.hpp"
@@ -13,6 +14,7 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        bool direct_io,
                        bool sync_writes,
                        bool cksum,
+                       bool cksum_only,
                        bool preserve_meta,
                        std::shared_ptr<ILogger> logger,
                        FileLogReporter* reporter)
@@ -22,6 +24,7 @@ CPFilePair::CPFilePair(std::string_view src_path,
       mDirectIO(direct_io),
       mSyncWrites(sync_writes),
       mCksum(cksum),
+      mCksumOnly(cksum_only),
       mPreserveMeta(preserve_meta),
       mLogger(logger),
       mReporter(reporter)
@@ -161,14 +164,22 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     }
 
     mLogger->trace("Opening/creating destination file: {}", mDstPath);
-    int dstOpenFlags = O_CREAT;
-    if (mCksum)
+    int dstOpenFlags = 0;
+    if (mCksumOnly)
     {
-        dstOpenFlags |= O_RDWR;
+        dstOpenFlags = O_RDONLY;
     }
     else
     {
-        dstOpenFlags |= O_WRONLY | O_TRUNC;
+        dstOpenFlags = O_CREAT;
+        if (mCksum)
+        {
+            dstOpenFlags |= O_RDWR;
+        }
+        else
+        {
+            dstOpenFlags |= O_WRONLY | O_TRUNC;
+        }
     }
 #ifdef O_DIRECT
     if (mDirectIO)
@@ -180,6 +191,16 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
 
     if (mDstFd < 0)
     {
+        if (mCksumOnly && errno == ENOENT)
+        {
+            close(mSrcFd);
+            mSrcFd = -1;
+            mSkipBlockCksum = true;
+            mReadBytes = static_cast<size_t>(mSrcStat.st_size);
+            mWrittenBytes = static_cast<size_t>(mSrcStat.st_size);
+            EmitCksumResult("skipped", "dst_missing");
+            return {};
+        }
         if (mReporter)
         {
             mReporter->FileError(mSrcPath, strerror(errno), errno, "failed");
@@ -282,14 +303,15 @@ tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::share
     {
         mChannel.MoveToInflight(pFP);
 
-        if (pFP->IsInitialized() && pFP->GetSrcFileSize() == 0)
+        if (pFP->IsInitialized() &&
+            (pFP->GetSrcFileSize() == 0 || pFP->IsSkipBlockCksum()))
         {
-            mLogger->debug("Source file size is 0, directly checking write completion for src: {}, dst: {}",
+            mLogger->debug("Source file size is 0 or skip block cksum, directly checking write completion for src: {}, dst: {}",
                            pFP->GetSrcPath(), pFP->GetDstPath());
             auto write_res = CheckWriteComplete(pFP);
             if (!write_res)
             {
-                return tl::unexpected(StackError("CheckWriteComplete() for 0-size file, err: ", write_res.error()));
+                return tl::unexpected(StackError("CheckWriteComplete() for 0-size or skip-cksum file, err: ", write_res.error()));
             }
         }
 
@@ -306,7 +328,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
     if (pFP->IsWriteFinished())
     {
-        if (mOptions.DirectIO)
+        if (mOptions.DirectIO && !pFP->IsSkipBlockCksum())
         {
             auto truncate_res = pFP->TruncateDstToSrcSize();
             if (!truncate_res)
@@ -314,7 +336,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                 return tl::unexpected(StackError("pFP->TruncateDstToSrcSize(), err: ", truncate_res.error()));
             }
         }
-        if (mOptions.SyncWrites && pFP->GetDstFileSize() > 0)
+        if (mOptions.SyncWrites && pFP->GetDstFileSize() > 0 && !pFP->IsSkipBlockCksum())
         {
             auto fsync_res = pFP->FsyncDst();
             if (!fsync_res)
@@ -323,13 +345,25 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
             }
         }
 
-        if (mOptions.PreserveMeta)
+        if (mOptions.PreserveMeta && !pFP->IsSkipBlockCksum())
         {
-            auto meta_res = pFP->PreserveMetadata();
-            if (!meta_res)
+            if (mOptions.CopyMode == "CksumOnly")
             {
-                mLogger->warn("PreserveMetadata failed for {}: {}",
-                              pFP->GetSrcPath(), meta_res.error().ToString());
+                auto diff_res = pFP->CompareMetadata();
+                if (!diff_res)
+                {
+                    mLogger->warn("CompareMetadata failed for {}: {}",
+                                  pFP->GetSrcPath(), diff_res.error().ToString());
+                }
+            }
+            else
+            {
+                auto meta_res = pFP->PreserveMetadata();
+                if (!meta_res)
+                {
+                    mLogger->warn("PreserveMetadata failed for {}: {}",
+                                  pFP->GetSrcPath(), meta_res.error().ToString());
+                }
             }
         }
 
@@ -657,6 +691,341 @@ tl::expected<void, StackError> CPFilePair::PreserveAcl()
     acl_free(acl);
     if (rc < 0)
         return tl::unexpected(StackError("acl_set_fd failed", errno));
+#endif
+    return {};
+}
+
+// === CompareMetadata 实现（CksumOnly 专用） ===
+
+void CPFilePair::EmitCksumResult(const std::string &result,
+                                 const std::string &reason,
+                                 size_t offset,
+                                 const std::string &detail)
+{
+    if (mReporter)
+    {
+        mReporter->FileCksumResult(mSrcPath, mDstPath, result, reason, offset, detail);
+    }
+}
+
+tl::expected<void, StackError> CPFilePair::CompareMetadata()
+{
+    struct stat dstStat;
+    if (lstat(mDstPath.c_str(), &dstStat) < 0)
+    {
+        EmitCksumResult("skipped", "dst_stat_failed");
+        return tl::unexpected(StackError("lstat dst failed", errno));
+    }
+
+    CompareMode(dstStat);
+    CompareOwnership(dstStat);
+    CompareTimestamps(dstStat);
+    CompareXattr(dstStat);
+    CompareAcl(dstStat);
+
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::CompareMode(const struct stat &dstStat)
+{
+    mode_t srcMode = mSrcStat.st_mode & 07777;
+    mode_t dstMode = dstStat.st_mode & 07777;
+    if (srcMode != dstMode)
+    {
+        EmitCksumResult("mismatch", "mode_mismatch", 0,
+                        fmt::format("src={:04o} dst={:04o}", srcMode, dstMode));
+    }
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::CompareOwnership(const struct stat &dstStat)
+{
+    if (mSrcStat.st_uid != dstStat.st_uid)
+    {
+        EmitCksumResult("mismatch", "owner_mismatch", 0,
+                        fmt::format("uid src={} dst={}", mSrcStat.st_uid, dstStat.st_uid));
+    }
+    if (mSrcStat.st_gid != dstStat.st_gid)
+    {
+        EmitCksumResult("mismatch", "owner_mismatch", 0,
+                        fmt::format("gid src={} dst={}", mSrcStat.st_gid, dstStat.st_gid));
+    }
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::CompareTimestamps(const struct stat &dstStat)
+{
+#ifdef __APPLE__
+    auto srcMtime = mSrcStat.st_mtimespec;
+    auto dstMtime = dstStat.st_mtimespec;
+    auto srcAtime = mSrcStat.st_atimespec;
+    auto dstAtime = dstStat.st_atimespec;
+#else
+    auto srcMtime = mSrcStat.st_mtim;
+    auto dstMtime = dstStat.st_mtim;
+    auto srcAtime = mSrcStat.st_atim;
+    auto dstAtime = dstStat.st_atim;
+#endif
+
+    if (srcMtime.tv_sec != dstMtime.tv_sec || srcMtime.tv_nsec != dstMtime.tv_nsec)
+    {
+        EmitCksumResult("mismatch", "timestamp_mismatch", 0, "mtime");
+    }
+    if (srcAtime.tv_sec != dstAtime.tv_sec || srcAtime.tv_nsec != dstAtime.tv_nsec)
+    {
+        EmitCksumResult("mismatch", "timestamp_mismatch", 0, "atime");
+    }
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::CompareXattr(const struct stat &dstStat)
+{
+#ifdef __APPLE__
+    int srcFd = mSrcFd;
+    int dstFd = mDstFd;
+    if (mIsSymlink)
+    {
+        srcFd = -1;
+        dstFd = -1;
+    }
+
+    // Collect src xattrs
+    std::set<std::string> srcNames;
+    std::map<std::string, std::vector<char>> srcValues;
+
+    ssize_t listLen = (srcFd >= 0)
+                          ? flistxattr(srcFd, nullptr, 0, 0)
+                          : listxattr(mSrcPath.c_str(), nullptr, 0, XATTR_NOFOLLOW);
+    if (listLen > 0)
+    {
+        std::vector<char> nameBuf(listLen);
+        listLen = (srcFd >= 0)
+                      ? flistxattr(srcFd, nameBuf.data(), listLen, 0)
+                      : listxattr(mSrcPath.c_str(), nameBuf.data(), listLen, XATTR_NOFOLLOW);
+        if (listLen > 0)
+        {
+            for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+                 name += strlen(name) + 1)
+            {
+                if (strncmp(name, "com.apple.", 10) == 0)
+                    continue;
+                srcNames.insert(name);
+                ssize_t valLen = (srcFd >= 0)
+                                     ? fgetxattr(srcFd, name, nullptr, 0, 0, 0)
+                                     : getxattr(mSrcPath.c_str(), name, nullptr, 0, 0, XATTR_NOFOLLOW);
+                if (valLen >= 0)
+                {
+                    std::vector<char> valBuf(valLen);
+                    valLen = (srcFd >= 0)
+                                 ? fgetxattr(srcFd, name, valBuf.data(), valLen, 0, 0)
+                                 : getxattr(mSrcPath.c_str(), name, valBuf.data(), valLen, 0, XATTR_NOFOLLOW);
+                    if (valLen >= 0)
+                        srcValues[name] = std::move(valBuf);
+                }
+            }
+        }
+    }
+
+    // Collect dst xattrs
+    std::set<std::string> dstNames;
+    std::map<std::string, std::vector<char>> dstValues;
+
+    listLen = (dstFd >= 0)
+                  ? flistxattr(dstFd, nullptr, 0, 0)
+                  : listxattr(mDstPath.c_str(), nullptr, 0, XATTR_NOFOLLOW);
+    if (listLen > 0)
+    {
+        std::vector<char> nameBuf(listLen);
+        listLen = (dstFd >= 0)
+                      ? flistxattr(dstFd, nameBuf.data(), listLen, 0)
+                      : listxattr(mDstPath.c_str(), nameBuf.data(), listLen, XATTR_NOFOLLOW);
+        if (listLen > 0)
+        {
+            for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+                 name += strlen(name) + 1)
+            {
+                if (strncmp(name, "com.apple.", 10) == 0)
+                    continue;
+                dstNames.insert(name);
+                ssize_t valLen = (dstFd >= 0)
+                                     ? fgetxattr(dstFd, name, nullptr, 0, 0, 0)
+                                     : getxattr(mDstPath.c_str(), name, nullptr, 0, 0, XATTR_NOFOLLOW);
+                if (valLen >= 0)
+                {
+                    std::vector<char> valBuf(valLen);
+                    valLen = (dstFd >= 0)
+                                 ? fgetxattr(dstFd, name, valBuf.data(), valLen, 0, 0)
+                                 : getxattr(mDstPath.c_str(), name, valBuf.data(), valLen, 0, XATTR_NOFOLLOW);
+                    if (valLen >= 0)
+                        dstValues[name] = std::move(valBuf);
+                }
+            }
+        }
+    }
+
+    // Compare
+    for (const auto &name : srcNames)
+    {
+        if (dstNames.find(name) == dstNames.end())
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "src_has:" + name);
+        }
+        else if (srcValues[name] != dstValues[name])
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "diff:" + name);
+        }
+    }
+    for (const auto &name : dstNames)
+    {
+        if (srcNames.find(name) == srcNames.end())
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "dst_has:" + name);
+        }
+    }
+#elif defined(__linux__)
+    int srcFd = mIsSymlink ? -1 : mSrcFd;
+    int dstFd = mIsSymlink ? -1 : mDstFd;
+    const char *srcPath = mSrcPath.c_str();
+    const char *dstPath = mDstPath.c_str();
+
+    std::set<std::string> srcNames;
+    std::map<std::string, std::vector<char>> srcValues;
+
+    ssize_t listLen = (srcFd >= 0)
+                          ? flistxattr(srcFd, nullptr, 0)
+                          : llistxattr(srcPath, nullptr, 0);
+    if (listLen > 0)
+    {
+        std::vector<char> nameBuf(listLen);
+        listLen = (srcFd >= 0)
+                      ? flistxattr(srcFd, nameBuf.data(), listLen)
+                      : llistxattr(srcPath, nameBuf.data(), listLen);
+        if (listLen > 0)
+        {
+            for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+                 name += strlen(name) + 1)
+            {
+                if (strcmp(name, "security.selinux") == 0)
+                    continue;
+                srcNames.insert(name);
+                ssize_t valLen = (srcFd >= 0)
+                                     ? fgetxattr(srcFd, name, nullptr, 0)
+                                     : lgetxattr(srcPath, name, nullptr, 0);
+                if (valLen >= 0)
+                {
+                    std::vector<char> valBuf(valLen);
+                    valLen = (srcFd >= 0)
+                                 ? fgetxattr(srcFd, name, valBuf.data(), valLen)
+                                 : lgetxattr(srcPath, name, valBuf.data(), valLen);
+                    if (valLen >= 0)
+                        srcValues[name] = std::move(valBuf);
+                }
+            }
+        }
+    }
+
+    std::set<std::string> dstNames;
+    std::map<std::string, std::vector<char>> dstValues;
+
+    listLen = (dstFd >= 0)
+                  ? flistxattr(dstFd, nullptr, 0)
+                  : llistxattr(dstPath, nullptr, 0);
+    if (listLen > 0)
+    {
+        std::vector<char> nameBuf(listLen);
+        listLen = (dstFd >= 0)
+                      ? flistxattr(dstFd, nameBuf.data(), listLen)
+                      : llistxattr(dstPath, nameBuf.data(), listLen);
+        if (listLen > 0)
+        {
+            for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+                 name += strlen(name) + 1)
+            {
+                if (strcmp(name, "security.selinux") == 0)
+                    continue;
+                dstNames.insert(name);
+                ssize_t valLen = (dstFd >= 0)
+                                     ? fgetxattr(dstFd, name, nullptr, 0)
+                                     : lgetxattr(dstPath, name, nullptr, 0);
+                if (valLen >= 0)
+                {
+                    std::vector<char> valBuf(valLen);
+                    valLen = (dstFd >= 0)
+                                 ? fgetxattr(dstFd, name, valBuf.data(), valLen)
+                                 : lgetxattr(dstPath, name, valBuf.data(), valLen);
+                    if (valLen >= 0)
+                        dstValues[name] = std::move(valBuf);
+                }
+            }
+        }
+    }
+
+    for (const auto &name : srcNames)
+    {
+        if (dstNames.find(name) == dstNames.end())
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "src_has:" + name);
+        }
+        else if (srcValues[name] != dstValues[name])
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "diff:" + name);
+        }
+    }
+    for (const auto &name : dstNames)
+    {
+        if (srcNames.find(name) == srcNames.end())
+        {
+            EmitCksumResult("mismatch", "xattr_mismatch", 0, "dst_has:" + name);
+        }
+    }
+#endif
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::CompareAcl(const struct stat &dstStat)
+{
+#ifdef HAS_LIBACL
+    if (mSrcFd < 0)
+        return {};
+
+    acl_t srcAcl = acl_get_fd(mSrcFd, ACL_TYPE_ACCESS);
+    if (!srcAcl)
+        return {};
+
+    char *srcText = acl_to_text(srcAcl, nullptr);
+    acl_free(srcAcl);
+
+    acl_t dstAcl = nullptr;
+    char *dstText = nullptr;
+    if (mDstFd >= 0)
+    {
+        dstAcl = acl_get_fd(mDstFd, ACL_TYPE_ACCESS);
+    }
+    if (!dstAcl)
+    {
+        dstAcl = acl_get_file(mDstPath.c_str(), ACL_TYPE_ACCESS);
+    }
+    if (dstAcl)
+    {
+        dstText = acl_to_text(dstAcl, nullptr);
+        acl_free(dstAcl);
+    }
+
+    if (srcText)
+    {
+        if (!dstText || strcmp(srcText, dstText) != 0)
+        {
+            EmitCksumResult("mismatch", "acl_mismatch", 0,
+                            fmt::format("src={} dst={}",
+                                        srcText ? srcText : "none",
+                                        dstText ? dstText : "none"));
+        }
+        acl_free(srcText);
+    }
+    if (dstText)
+    {
+        acl_free(dstText);
+    }
 #endif
     return {};
 }

@@ -68,6 +68,7 @@ public:
                bool direct_io,
                bool sync_writes,
                bool cksum,
+               bool cksum_only,
                bool preserve_meta,
                std::shared_ptr<ILogger> logger,
                FileLogReporter* reporter); // full path expected
@@ -86,6 +87,7 @@ public:
     }
     tl::expected<void, StackError> CheckAndInit();
     tl::expected<void, StackError> PreserveMetadata();
+    tl::expected<void, StackError> CompareMetadata();
     tl::expected<void, StackError> TruncateDstToSrcSize()
     {
         if (ftruncate(mDstFd, mSrcStat.st_size) < 0)
@@ -128,9 +130,10 @@ public:
     }
     void SetReadFinished() { mReadBytes = GetSrcFileSize(); }
     void SetWriteFinished() { mWrittenBytes = GetSrcFileSize(); }
-    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir() || IsSymlink(); }
+    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir() || IsSymlink() || mSkipBlockCksum; }
     bool IsDir() const { return mIsDir; }
     bool IsSymlink() const { return mIsSymlink; }
+    bool IsSkipBlockCksum() const { return mSkipBlockCksum; }
 
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
@@ -161,10 +164,12 @@ private:
     bool mDirectIO = false;
     bool mSyncWrites = false;
     bool mCksum = false;
+    bool mCksumOnly = false;
     bool mPreserveMeta = false;
 
     bool mIsDir = false;
     bool mIsSymlink = false;
+    bool mSkipBlockCksum = false;
 
     bool mIsChksumError = false;
 
@@ -181,6 +186,16 @@ private:
     tl::expected<void, StackError> PreserveXattr();
     tl::expected<void, StackError> PreserveAcl();
     void EmitMetaWarning(const std::string &metaType, int err);
+
+    tl::expected<void, StackError> CompareMode(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareOwnership(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareTimestamps(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareXattr(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareAcl(const struct stat &dstStat);
+    void EmitCksumResult(const std::string &result,
+                         const std::string &reason,
+                         size_t offset = 0,
+                         const std::string &detail = "");
 };
 
 class CPFilePairMgr
@@ -199,6 +214,7 @@ public:
                        mOptions.DirectIO,
                        mOptions.SyncWrites,
                        (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
+                       (mOptions.CopyMode == "CksumOnly"),
                        mOptions.PreserveMeta,
                        mLogger,
                        mReporter));
@@ -403,14 +419,6 @@ public:
                 mDigest = std::make_unique<XXHash64Digest>();
             }
 
-            if (options.CopyMode == "CksumOnly")
-            {
-                mCksumResultFile.open("./cksum_result.log", std::ios::out | std::ios::trunc);
-                if (!mCksumResultFile.is_open())
-                {
-                    throw std::runtime_error("Failed to open/create ./cksum_result.log for writing checksum results.");
-                }
-            }
         }
     }
     virtual ~IOSlotMgr() = default;
@@ -999,13 +1007,21 @@ protected:
         }
         else // CksumOnly
         {
-            // write the cksum result to ./cksum_result.log file
             if (bothSlotsReadReaped(slot, slot->GetAssociatedSlot()))
             {
                 auto ioSlot = (slot->GetType() == "rw") ? slot : slot->GetAssociatedSlot();
                 bool match = cksum(slot, slot->GetAssociatedSlot());
-                mCksumResultFile << ioSlot->GetCPFPPtr()->GetSrcPath() << "," << ioSlot->GetCPFPPtr()->GetDstPath()
-                                 << "," << offset << "," << (match ? "MATCHED" : "MISMATCH") << std::endl;
+
+                if (mReporter)
+                {
+                    mReporter->FileCksumResult(
+                        ioSlot->GetCPFPPtr()->GetSrcPath(),
+                        ioSlot->GetCPFPPtr()->GetDstPath(),
+                        match ? "match" : "mismatch",
+                        match ? "block_match" : "block_mismatch",
+                        static_cast<size_t>(offset));
+                }
+
                 if (!match)
                 {
                     mLogger->debug("Checksum mismatch detected at offset: {} for src: {}, dst: {}",
@@ -1104,5 +1120,4 @@ protected:
     std::shared_ptr<FuncDurationStat> mFuncDurationStat;
 
     std::unique_ptr<Digest> mDigest;
-    std::ofstream mCksumResultFile;
 };

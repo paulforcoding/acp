@@ -192,7 +192,6 @@ if(BUILD_TESTS)
         list(FILTER TEST_SOURCES EXCLUDE REGEX "test_integration_liburing")
         list(FILTER TEST_SOURCES EXCLUDE REGEX "test_integration_inotify")
         list(FILTER TEST_SOURCES EXCLUDE REGEX "test_integration_direct_io")
-        list(FILTER TEST_SOURCES EXCLUDE REGEX "test_cksum_copy")
     endif()
 
     # Test executable needs implementation objects (same as acp minus main.cpp)

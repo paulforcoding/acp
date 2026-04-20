@@ -33,7 +33,7 @@ TEST_CASE("CPFilePair symlink copy", "[cpfilepair]")
     REQUIRE(!ec);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_link, dst_dir + "/link.txt", 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src_link, dst_dir + "/link.txt", 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
     REQUIRE(p.IsSymlink());
@@ -56,7 +56,7 @@ TEST_CASE("CPFilePair dangling symlink", "[cpfilepair]")
     REQUIRE(!ec);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_link, dst_dir + "/dangling_link", 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src_link, dst_dir + "/dangling_link", 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
     REQUIRE(p.IsSymlink());
@@ -80,7 +80,7 @@ TEST_CASE("CPFilePair symlink overwrites existing dst", "[cpfilepair]")
     REQUIRE(!ec);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_link, dst_link, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src_link, dst_link, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
     auto new_target = fs::read_symlink(dst_link, ec);
@@ -99,7 +99,7 @@ TEST_CASE("CPFilePair directory copy", "[cpfilepair]")
     ensure_clean_dir("tests/tmp_dir_dst");
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_dir, dst_dir, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src_dir, dst_dir, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
     REQUIRE(p.IsDir());
@@ -118,7 +118,7 @@ TEST_CASE("CPFilePair directory already exists", "[cpfilepair]")
     ensure_clean_dir(dst_dir);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_dir, dst_dir, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src_dir, dst_dir, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
     REQUIRE(fs::is_directory(dst_dir));
@@ -144,7 +144,7 @@ TEST_CASE("CPFilePair truncate and fsync", "[cpfilepair]")
     }
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src, dst, 4096, false, true, false, false, logger, nullptr);
+    CPFilePair p(src, dst, 4096, false, true, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 
@@ -173,7 +173,7 @@ TEST_CASE("CPFilePair offset tracking", "[cpfilepair]")
     }
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src, dst, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src, dst, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 
@@ -213,7 +213,7 @@ TEST_CASE("CPFilePair zero size file", "[cpfilepair]")
     REQUIRE(fs::file_size(src) == 0);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src, dst, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src, dst, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 
@@ -241,7 +241,7 @@ TEST_CASE("CPFilePair DoDstState", "[cpfilepair]")
     }
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src, dst, 4096, false, false, false, false, logger, nullptr);
+    CPFilePair p(src, dst, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 

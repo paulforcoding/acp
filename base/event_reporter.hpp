@@ -76,6 +76,25 @@ public:
             errnoCode, CurrentIsoTimestamp()));
     }
 
+    void FileCksumResult(const std::string &src,
+                         const std::string &dst,
+                         const std::string &result,
+                         const std::string &reason,
+                         size_t offset = 0,
+                         const std::string &detail = "")
+    {
+        if (!mEnabled)
+            return;
+        EmitEvent(fmt::format(
+            "{{\"type\":\"file_info\",\"event\":\"cksum_result\","
+            "\"src\":\"{}\",\"dst\":\"{}\",\"result\":\"{}\",\"reason\":\"{}\","
+            "\"offset\":{},\"detail\":\"{}\",\"timestamp\":\"{}\"}}",
+            EscapeJsonString(src), EscapeJsonString(dst),
+            result, EscapeJsonString(reason),
+            offset, EscapeJsonString(detail),
+            CurrentIsoTimestamp()));
+    }
+
     void CopyPlan(const std::string &scanState,
                   size_t filesTotal, size_t dirsTotal, size_t symlinksTotal,
                   size_t bytesTotal, size_t filesRegular, size_t filesUnsupported)
