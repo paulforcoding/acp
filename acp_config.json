@@ -12,6 +12,7 @@
   "CopyChanSize": 10,
   "EnableInotify": false,
   "PreserveSparseFiles": true,
+  "PreserveMeta": true,
   "DirectIO": false,
   "SyncWrites": false,
   "CopyOptions": {

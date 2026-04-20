@@ -1,6 +1,11 @@
 #include <filesystem>
+#include <sys/xattr.h>
 #include "base/event_reporter.hpp"
 #include "lib/combined/combined.hpp"
+
+#ifdef HAS_LIBACL
+#include <sys/acl.h>
+#endif
 
 CPFilePair::CPFilePair(std::string_view src_path,
                        std::string_view dst_path,
@@ -8,6 +13,7 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        bool direct_io,
                        bool sync_writes,
                        bool cksum,
+                       bool preserve_meta,
                        std::shared_ptr<ILogger> logger,
                        FileLogReporter* reporter)
     : mSrcPath(src_path),
@@ -16,6 +22,7 @@ CPFilePair::CPFilePair(std::string_view src_path,
       mDirectIO(direct_io),
       mSyncWrites(sync_writes),
       mCksum(cksum),
+      mPreserveMeta(preserve_meta),
       mLogger(logger),
       mReporter(reporter)
 {
@@ -59,6 +66,10 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                 fmt::format("Failed to create symlink at destination: {}, pointing to: {}, errstr: {}",
                             mDstPath, target_path.string(), ec.message())));
         }
+        if (lstat(mSrcPath.c_str(), &mSrcStat) == 0 && mPreserveMeta)
+        {
+            PreserveMetadata();
+        }
         if (mReporter)
         {
             mReporter->FileStart(mSrcPath, mDstPath, 0);
@@ -78,6 +89,10 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
         {
             return tl::unexpected(StackError(
                 fmt::format("Failed to create destination directory: {}, errstr: {}", mDstPath, ec.message())));
+        }
+        if (lstat(mSrcPath.c_str(), &mSrcStat) == 0 && mPreserveMeta)
+        {
+            PreserveMetadata();
         }
         if (mReporter)
         {
@@ -308,6 +323,16 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
             }
         }
 
+        if (mOptions.PreserveMeta)
+        {
+            auto meta_res = pFP->PreserveMetadata();
+            if (!meta_res)
+            {
+                mLogger->warn("PreserveMetadata failed for {}: {}",
+                              pFP->GetSrcPath(), meta_res.error().ToString());
+            }
+        }
+
         mChannel.RemoveFromInflight(pFP);
 
         if (mReporter)
@@ -404,4 +429,234 @@ size_t FPChannel::InflightCount() const
 {
     std::lock_guard<std::mutex> lock(mMutex);
     return mInflight.size();
+}
+
+// === PreserveMeta 实现 ===
+
+tl::expected<void, StackError> CPFilePair::PreserveMetadata()
+{
+    if (!mPreserveMeta)
+        return {};
+
+    if (auto r = PreserveMode(); !r)
+        EmitMetaWarning("mode", errno);
+    if (auto r = PreserveOwnership(); !r)
+        EmitMetaWarning("ownership", errno);
+    if (auto r = PreserveTimestamps(); !r)
+        EmitMetaWarning("mtime", errno);
+    if (auto r = PreserveXattr(); !r)
+        EmitMetaWarning("xattr", errno);
+    if (auto r = PreserveAcl(); !r)
+        EmitMetaWarning("acl", errno);
+
+    return {};
+}
+
+void CPFilePair::EmitMetaWarning(const std::string &metaType, int err)
+{
+    if (mReporter)
+    {
+        mReporter->FileMetaWarning(mSrcPath, metaType, strerror(err), err);
+    }
+}
+
+tl::expected<void, StackError> CPFilePair::PreserveMode()
+{
+    mode_t mode = mSrcStat.st_mode & 07777;
+    if (mDstFd >= 0)
+    {
+        if (fchmod(mDstFd, mode) < 0)
+            return tl::unexpected(StackError("fchmod failed", errno));
+    }
+    else
+    {
+        if (chmod(mDstPath.c_str(), mode) < 0)
+            return tl::unexpected(StackError("chmod failed", errno));
+    }
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::PreserveOwnership()
+{
+    int rc;
+    if (mIsSymlink)
+    {
+        rc = lchown(mDstPath.c_str(), mSrcStat.st_uid, mSrcStat.st_gid);
+    }
+    else if (mDstFd >= 0)
+    {
+        rc = fchown(mDstFd, mSrcStat.st_uid, mSrcStat.st_gid);
+    }
+    else
+    {
+        rc = chown(mDstPath.c_str(), mSrcStat.st_uid, mSrcStat.st_gid);
+    }
+
+    if (rc < 0)
+    {
+        if (errno == EPERM)
+            return {}; // 非 root 用户预期行为，静默
+        return tl::unexpected(StackError("chown failed", errno));
+    }
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::PreserveTimestamps()
+{
+    struct timespec times[2];
+#ifdef __APPLE__
+    times[0] = mSrcStat.st_atimespec;
+    times[1] = mSrcStat.st_mtimespec;
+#else
+    times[0] = mSrcStat.st_atim;
+    times[1] = mSrcStat.st_mtim;
+#endif
+
+    int rc;
+    if (mIsSymlink)
+    {
+#ifdef __APPLE__
+        rc = utimensat(AT_FDCWD, mDstPath.c_str(), times, AT_SYMLINK_NOFOLLOW);
+#else
+        rc = lutimens(mDstPath.c_str(), times);
+#endif
+    }
+    else if (mDstFd >= 0)
+    {
+        rc = futimens(mDstFd, times);
+    }
+    else
+    {
+        rc = utimensat(AT_FDCWD, mDstPath.c_str(), times, 0);
+    }
+
+    if (rc < 0)
+        return tl::unexpected(StackError("utimens failed", errno));
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::PreserveXattr()
+{
+#ifdef __APPLE__
+    // macOS: fgetxattr/fsetxattr 签名: (fd, name, value, size, position, options)
+    int srcFd = mSrcFd;
+    int dstFd = mDstFd;
+    if (mIsSymlink)
+    {
+        // symlink 用 path-based API
+        srcFd = -1;
+        dstFd = -1;
+    }
+
+    ssize_t listLen = (srcFd >= 0)
+                          ? flistxattr(srcFd, nullptr, 0, 0)
+                          : listxattr(mSrcPath.c_str(), nullptr, 0, XATTR_NOFOLLOW);
+    if (listLen <= 0)
+        return {};
+
+    std::vector<char> nameBuf(listLen);
+    listLen = (srcFd >= 0)
+                  ? flistxattr(srcFd, nameBuf.data(), listLen, 0)
+                  : listxattr(mSrcPath.c_str(), nameBuf.data(), listLen, XATTR_NOFOLLOW);
+    if (listLen <= 0)
+        return {};
+
+    for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+         name += strlen(name) + 1)
+    {
+        // 跳过 macOS 系统 xattr（系统通过 fcopyfile() 自动管理）
+        if (strncmp(name, "com.apple.", 10) == 0)
+            continue;
+
+        ssize_t valLen = (srcFd >= 0)
+                             ? fgetxattr(srcFd, name, nullptr, 0, 0, 0)
+                             : getxattr(mSrcPath.c_str(), name, nullptr, 0, 0, XATTR_NOFOLLOW);
+        if (valLen < 0)
+            continue;
+
+        std::vector<char> valBuf(valLen);
+        valLen = (srcFd >= 0)
+                     ? fgetxattr(srcFd, name, valBuf.data(), valLen, 0, 0)
+                     : getxattr(mSrcPath.c_str(), name, valBuf.data(), valLen, 0, XATTR_NOFOLLOW);
+        if (valLen < 0)
+            continue;
+
+        int rc = (dstFd >= 0)
+                     ? fsetxattr(dstFd, name, valBuf.data(), valLen, 0, 0)
+                     : setxattr(mDstPath.c_str(), name, valBuf.data(), valLen, 0, XATTR_NOFOLLOW);
+        if (rc < 0)
+        {
+            mLogger->warn("setxattr failed for {} on {}: {}",
+                          name, mDstPath, strerror(errno));
+        }
+    }
+#elif defined(__linux__)
+    int srcFd = mIsSymlink ? -1 : mSrcFd;
+    const char *srcPath = mSrcPath.c_str();
+    const char *dstPath = mDstPath.c_str();
+
+    ssize_t listLen = (srcFd >= 0)
+                          ? flistxattr(srcFd, nullptr, 0)
+                          : llistxattr(srcPath, nullptr, 0);
+    if (listLen <= 0)
+        return {};
+
+    std::vector<char> nameBuf(listLen);
+    listLen = (srcFd >= 0)
+                  ? flistxattr(srcFd, nameBuf.data(), listLen)
+                  : llistxattr(srcPath, nameBuf.data(), listLen);
+    if (listLen <= 0)
+        return {};
+
+    for (char *name = nameBuf.data(); name < nameBuf.data() + listLen;
+         name += strlen(name) + 1)
+    {
+        // 跳过 SELinux 上下文
+        if (strcmp(name, "security.selinux") == 0)
+            continue;
+
+        ssize_t valLen = (srcFd >= 0)
+                             ? fgetxattr(srcFd, name, nullptr, 0)
+                             : lgetxattr(srcPath, name, nullptr, 0);
+        if (valLen < 0)
+            continue;
+
+        std::vector<char> valBuf(valLen);
+        valLen = (srcFd >= 0)
+                     ? fgetxattr(srcFd, name, valBuf.data(), valLen)
+                     : lgetxattr(srcPath, name, valBuf.data(), valLen);
+        if (valLen < 0)
+            continue;
+
+        int rc = (mDstFd >= 0 && !mIsSymlink)
+                     ? fsetxattr(mDstFd, name, valBuf.data(), valLen, 0)
+                     : lsetxattr(dstPath, name, valBuf.data(), valLen, 0);
+        if (rc < 0)
+        {
+            mLogger->warn("setxattr failed for {} on {}: {}",
+                          name, dstPath, strerror(errno));
+        }
+    }
+#endif
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::PreserveAcl()
+{
+#ifdef HAS_LIBACL
+    if (mSrcFd < 0 || mDstFd < 0)
+        return {};
+
+    acl_t acl = acl_get_fd(mSrcFd, ACL_TYPE_ACCESS);
+    if (!acl)
+        acl = acl_get_fd(mSrcFd, ACL_TYPE_DEFAULT);
+    if (!acl)
+        return {};
+
+    int rc = acl_set_fd(mDstFd, acl);
+    acl_free(acl);
+    if (rc < 0)
+        return tl::unexpected(StackError("acl_set_fd failed", errno));
+#endif
+    return {};
 }

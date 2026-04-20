@@ -48,6 +48,7 @@ struct RWCombinedCopyOptions
     int CopyChanSize = 10;
     bool EnableInotify = false;
     bool PreserveSparseFiles = false;
+    bool PreserveMeta = true;
     bool DirectIO = false;
     bool SyncWrites = false;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
@@ -67,6 +68,7 @@ public:
                bool direct_io,
                bool sync_writes,
                bool cksum,
+               bool preserve_meta,
                std::shared_ptr<ILogger> logger,
                FileLogReporter* reporter); // full path expected
     ~CPFilePair()
@@ -83,6 +85,7 @@ public:
         }
     }
     tl::expected<void, StackError> CheckAndInit();
+    tl::expected<void, StackError> PreserveMetadata();
     tl::expected<void, StackError> TruncateDstToSrcSize()
     {
         if (ftruncate(mDstFd, mSrcStat.st_size) < 0)
@@ -158,6 +161,7 @@ private:
     bool mDirectIO = false;
     bool mSyncWrites = false;
     bool mCksum = false;
+    bool mPreserveMeta = false;
 
     bool mIsDir = false;
     bool mIsSymlink = false;
@@ -170,6 +174,13 @@ private:
     std::shared_ptr<ILogger> mLogger;
     FileLogReporter* mReporter = nullptr;
     std::chrono::steady_clock::time_point mStartTime;
+
+    tl::expected<void, StackError> PreserveMode();
+    tl::expected<void, StackError> PreserveOwnership();
+    tl::expected<void, StackError> PreserveTimestamps();
+    tl::expected<void, StackError> PreserveXattr();
+    tl::expected<void, StackError> PreserveAcl();
+    void EmitMetaWarning(const std::string &metaType, int err);
 };
 
 class CPFilePairMgr
@@ -188,6 +199,7 @@ public:
                        mOptions.DirectIO,
                        mOptions.SyncWrites,
                        (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
+                       mOptions.PreserveMeta,
                        mLogger,
                        mReporter));
         return {};

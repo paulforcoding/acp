@@ -61,6 +61,21 @@ public:
                               EscapeJsonString(src), EscapeJsonString(fileType), action, CurrentIsoTimestamp()));
     }
 
+    void FileMetaWarning(const std::string &src,
+                         const std::string &metaType,
+                         const std::string &error,
+                         int errnoCode)
+    {
+        if (!mEnabled)
+            return;
+        EmitEvent(fmt::format(
+            "{{\"type\":\"file_info\",\"event\":\"meta_warning\","
+            "\"src\":\"{}\",\"meta_type\":\"{}\",\"error\":\"{}\","
+            "\"errno\":{},\"timestamp\":\"{}\"}}",
+            EscapeJsonString(src), metaType, EscapeJsonString(error),
+            errnoCode, CurrentIsoTimestamp()));
+    }
+
     void CopyPlan(const std::string &scanState,
                   size_t filesTotal, size_t dirsTotal, size_t symlinksTotal,
                   size_t bytesTotal, size_t filesRegular, size_t filesUnsupported)
