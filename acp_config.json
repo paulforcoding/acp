@@ -1,10 +1,10 @@
 {
-  "ProgramLogLevel": "info",
-  "ProgramLogMode": "console",
-  "ProgramLogFilePath": "./acp.log",
-  "FileLogEnabled": false,
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "file",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": true,
   "FileLogIntervalSec": 5,
-  "FileLogPath": "./.acp_state.json",
+  "FileLogPath": "/tmp/acp_file_info.json",
   "CopyEngine": "libaio",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
@@ -16,8 +16,8 @@
   "DirectIO": false,
   "SyncWrites": false,
   "CopyOptions": {
-    "QueueDepth": 8,
-    "IOSize": 1048576,
+    "QueueDepth": 16,
+    "IOSize": 131072,
     "Batch": 8,
     "IOReapWait": 1
   }

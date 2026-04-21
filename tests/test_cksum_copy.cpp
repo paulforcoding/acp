@@ -73,6 +73,7 @@ static RWCombinedCopyOptions make_cksum_options()
     options.Batch = 2;
     options.IOReapWait = 1;
     options.FileLogEnabled = true;
+    options.FileLogMode = "console";
     options.FileLogIntervalSec = 5;
     options.FileLogPath = "./.acp_state.json";
     return options;

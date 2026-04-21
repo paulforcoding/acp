@@ -137,7 +137,7 @@ static RWCombinedCopyOptions make_test_options()
     options.QueueDepth = 4;
     options.Batch = 2;
     options.IOReapWait = 1;
-    options.FileLogEnabled = true;
+    options.FileLogEnabled = false;
     options.FileLogIntervalSec = 5;
     options.FileLogPath = "./.acp_state.json";
     return options;
@@ -148,6 +148,8 @@ static std::string run_cksum_only(const fs::path &src_dir, const fs::path &dst_d
     auto options = make_test_options();
     options.CopyMode = "CksumOnly";
     options.PreserveMeta = true;
+    options.FileLogEnabled = true;
+    options.FileLogMode = "console";
     auto logger = InitLogger(options);
 
     StdoutCapture capture;

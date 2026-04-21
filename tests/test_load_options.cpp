@@ -107,6 +107,7 @@ TEST_CASE("LoadCopyOptions defaults", "[config]")
     REQUIRE(opt->DirectIO == false);            // default
     REQUIRE(opt->EnableInotify == false);       // default
     REQUIRE(opt->PreserveSparseFiles == true);  // default (matches GNU cp --sparse=auto)
+    REQUIRE(opt->FileLogMode == "file");        // default
 
     fs::remove(cfg);
 }

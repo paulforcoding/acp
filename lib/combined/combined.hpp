@@ -39,6 +39,7 @@ struct RWCombinedCopyOptions
     std::string ProgramLogMode;
     std::string ProgramLogFilePath;
     bool FileLogEnabled = false;
+    std::string FileLogMode;        // "console" or "file", default: "file"
     int FileLogIntervalSec = 5;
     std::string FileLogPath;
     std::string CopyEngine;
