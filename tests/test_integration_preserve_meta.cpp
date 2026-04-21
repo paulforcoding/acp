@@ -119,7 +119,8 @@ static RWCombinedCopyOptions make_test_options()
 {
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "error";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
 #ifdef __APPLE__
     options.CopyEngine = "gcd";
 #else

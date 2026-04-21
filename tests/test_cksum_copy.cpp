@@ -58,7 +58,8 @@ static RWCombinedCopyOptions make_cksum_options()
 {
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "error";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
     options.CopyEngine = "libaio";
     options.CopyMode = "CksumCopy";
     options.CksumAlgorithm = "xxhash64";

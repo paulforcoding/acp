@@ -58,7 +58,8 @@ static RWCombinedCopyOptions make_directio_options()
 {
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "info";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
     options.CopyEngine = "libaio";
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 1;

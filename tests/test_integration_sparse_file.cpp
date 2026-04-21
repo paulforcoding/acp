@@ -75,7 +75,8 @@ TEST_CASE("SP-01: sparse file with hole in middle is preserved", "[sparse]")
 
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "error";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
 #ifdef __APPLE__
     options.CopyEngine = "gcd";
 #else
@@ -144,7 +145,8 @@ TEST_CASE("SP-02: non-sparse file copy is not affected by heuristic", "[sparse]"
 
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "error";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
 #ifdef __APPLE__
     options.CopyEngine = "gcd";
 #else

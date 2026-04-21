@@ -26,6 +26,8 @@ TEST_CASE("CPFilePairMgr PeekFront after AddFilePair", "[cpfilepairmgr]")
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     // Before AddFilePair, channel is empty but not closed
@@ -52,6 +54,8 @@ TEST_CASE("CPFilePairMgr GetNextReadIO single file", "[cpfilepairmgr]")
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     auto add_res = mgr.AddFilePair(src_file, dst_dir + "/file.txt");
@@ -75,6 +79,8 @@ TEST_CASE("CPFilePairMgr GetNextReadIO returns null at end", "[cpfilepairmgr]")
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     mgr.SetStopFlag();
@@ -91,6 +97,8 @@ TEST_CASE("CPFilePairMgr WaitForWorkOrClose lifecycle", "[cpfilepairmgr]")
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     // Empty and not closed: should wait then return true (timeout)
@@ -124,6 +132,8 @@ TEST_CASE("CPFilePairMgr CheckWriteComplete with finished file", "[cpfilepairmgr
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     auto add_res = mgr.AddFilePair(src_file, dst_dir + "/file.txt");
@@ -161,6 +171,8 @@ TEST_CASE("CPFilePairMgr multiple files round robin", "[cpfilepairmgr]")
     opts.IoSize = 4096;
     opts.DirectIO = false;
     opts.SyncWrites = false;
+    opts.ProgramLogMode = "file";
+    opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
     CPFilePairMgr mgr(opts, logger, nullptr);
     auto r1 = mgr.AddFilePair(src_dir + "/a.txt", dst_dir + "/a.txt");
