@@ -996,6 +996,11 @@ protected:
                 {
                     return tl::unexpected(StackError("SkipWriteAsHole() err: ", skip_res.error()));
                 }
+                auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
+                if (!check_res)
+                {
+                    return tl::unexpected(StackError("CheckWriteComplete after SkipWriteAsHole, err: ", check_res.error()));
+                }
                 slot->Reset();
             }
             else
@@ -1044,6 +1049,11 @@ protected:
                         if (!skip_res)
                         {
                             return tl::unexpected(StackError("SkipWriteAsHole() after cksum mismatch, err: ", skip_res.error()));
+                        }
+                        auto check_res = mCPFPMgr->CheckWriteComplete(ioSlot->GetCPFPPtr());
+                        if (!check_res)
+                        {
+                            return tl::unexpected(StackError("CheckWriteComplete after SkipWriteAsHole, err: ", check_res.error()));
                         }
                         ioSlot->Reset();
                     }
