@@ -86,7 +86,11 @@ TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
     REQUIRE(pid >= 0);
     if (pid == 0)
     {
-        // child: run CopyDir; when inotify is enabled it never returns normally
+        // child: reset signal handlers inherited from parent (Catch2 installs its own)
+        // so that SIGTERM kills us cleanly instead of being caught as a test failure
+        ::signal(SIGTERM, SIG_DFL);
+        ::signal(SIGINT, SIG_DFL);
+        // run CopyDir; when inotify is enabled it never returns normally
         int rc = CopyDir(src_dir, dst_dir, options, logger, nullptr);
         _exit(rc);
     }
