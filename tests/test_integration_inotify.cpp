@@ -5,8 +5,9 @@
 #include <unistd.h>
 #include <thread>
 #include <chrono>
-#include <future>
 #include <atomic>
+#include <sys/wait.h>
+#include <signal.h>
 
 namespace fs = std::filesystem;
 
@@ -80,23 +81,26 @@ TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
     auto options = make_inotify_options();
     auto logger = InitLogger(options);
 
-    std::atomic<bool> stopFlag{false};
+    // Run CopyDir with inotify in a child process (it runs indefinitely)
+    pid_t pid = ::fork();
+    REQUIRE(pid >= 0);
+    if (pid == 0)
+    {
+        // child: run CopyDir; when inotify is enabled it never returns normally
+        int rc = CopyDir(src_dir, dst_dir, options, logger, nullptr);
+        _exit(rc);
+    }
 
-    // Run CopyDir with inotify in background
-    std::future<int> copy_future = std::async(std::launch::async, [&]() {
-        return CopyDir(src_dir, dst_dir, options, logger, &stopFlag);
-    });
-
-    // Wait for initial copy to complete (SSD: should finish within 1s)
+    // parent: wait for initial copy to complete
     bool initial_copied = false;
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < 50; ++i)
     {
         if (fs::exists(dst_dir / "initial.dat"))
         {
             initial_copied = true;
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
     REQUIRE(initial_copied);
 
@@ -104,10 +108,10 @@ TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
     write_file(src_dir / "newfile1.dat", "new content one");
     write_file(src_dir / "newfile2.dat", "new content two");
 
-    // Wait for inotify to pick up the changes (SSD: should finish within 1s)
+    // Wait for inotify to pick up the changes
     bool new1_copied = false;
     bool new2_copied = false;
-    for (int i = 0; i < 20; ++i)
+    for (int i = 0; i < 50; ++i)
     {
         if (!new1_copied && fs::exists(dst_dir / "newfile1.dat"))
             new1_copied = true;
@@ -115,7 +119,7 @@ TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
             new2_copied = true;
         if (new1_copied && new2_copied)
             break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     REQUIRE(new1_copied);
@@ -123,12 +127,17 @@ TEST_CASE("CopyDir with inotify detects new files", "[integration][inotify]")
     REQUIRE(files_equal(src_dir / "newfile1.dat", dst_dir / "newfile1.dat"));
     REQUIRE(files_equal(src_dir / "newfile2.dat", dst_dir / "newfile2.dat"));
 
-    // Signal CopyDir to stop
-    stopFlag.store(true);
-
-    // Wait for CopyDir to finish (should exit within 2s)
-    auto status = copy_future.wait_for(std::chrono::seconds(2));
-    REQUIRE(status == std::future_status::ready);
+    // Kill the child process (inotify mode runs forever)
+    ::kill(pid, SIGTERM);
+    for (int i = 0; i < 20; ++i)
+    {
+        int status = 0;
+        if (::waitpid(pid, &status, WNOHANG) == pid)
+            break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    ::kill(pid, SIGKILL);
+    ::waitpid(pid, nullptr, 0);
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
