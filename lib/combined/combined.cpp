@@ -42,6 +42,22 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     {
         mIsSymlink = true;
 
+        if (lstat(mSrcPath.c_str(), &mSrcStat) < 0)
+        {
+            return tl::unexpected(StackError(
+                fmt::format("lstat src symlink failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
+        }
+
+        if (mCksumOnly)
+        {
+            mSkipBlockCksum = true;
+            mReadBytes = GetSrcFileSize();
+            mWrittenBytes = GetSrcFileSize();
+            if (mReporter)
+                mReporter->FileStart(mSrcPath, mDstPath, 0);
+            return {};
+        }
+
         std::error_code ec;
         auto target_path = fs::read_symlink(mSrcPath, ec);
         if (ec)
@@ -70,10 +86,9 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                 fmt::format("Failed to create symlink at destination: {}, pointing to: {}, errstr: {}",
                             mDstPath, target_path.string(), ec.message())));
         }
-        if (lstat(mSrcPath.c_str(), &mSrcStat) == 0 && mPreserveMeta)
-        {
+        if (mPreserveMeta)
             PreserveMetadata();
-        }
+
         if (mReporter)
         {
             mReporter->FileStart(mSrcPath, mDstPath, 0);
@@ -87,6 +102,23 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     if (fs::is_directory(mSrcPath))
     {
         mIsDir = true;
+
+        if (lstat(mSrcPath.c_str(), &mSrcStat) < 0)
+        {
+            return tl::unexpected(StackError(
+                fmt::format("lstat src directory failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
+        }
+
+        if (mCksumOnly)
+        {
+            mSkipBlockCksum = true;
+            mReadBytes = GetSrcFileSize();
+            mWrittenBytes = GetSrcFileSize();
+            if (mReporter)
+                mReporter->FileStart(mSrcPath, mDstPath, 0);
+            return {};
+        }
+
         std::error_code ec;
         fs::create_directories(mDstPath, ec);
         if (ec)
@@ -94,10 +126,9 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             return tl::unexpected(StackError(
                 fmt::format("Failed to create destination directory: {}, errstr: {}", mDstPath, ec.message())));
         }
-        if (lstat(mSrcPath.c_str(), &mSrcStat) == 0 && mPreserveMeta)
-        {
+        if (mPreserveMeta)
             PreserveMetadata();
-        }
+
         if (mReporter)
         {
             mReporter->FileStart(mSrcPath, mDstPath, 0);
@@ -150,6 +181,9 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     {
         return tl::unexpected(StackError("Source file is not a regular file: " + mSrcPath));
     }
+
+    // Heuristic: if actual disk blocks are fewer than size/512, file is probably sparse
+    mIsProbablySparse = (mSrcStat.st_blocks * 512 < mSrcStat.st_size);
 
     // check dst file path, create if not exist
     std::string dst_dir = fs::path(mDstPath).parent_path().string();
@@ -261,6 +295,18 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
 
         if (front->IsDir() || front->IsSymlink())
         {
+            if (mOptions.CopyMode == "CksumOnly")
+            {
+                auto read_complete_res = CheckReadCompleteNoLock(front);
+                if (!read_complete_res)
+                {
+                    return tl::unexpected(read_complete_res.error());
+                }
+                if (read_complete_res.value())
+                {
+                    continue;
+                }
+            }
             mChannel.PopFront();
             continue;
         }
@@ -329,7 +375,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
     if (pFP->IsWriteFinished())
     {
-        if (mOptions.DirectIO && !pFP->IsSkipBlockCksum())
+        if ((mOptions.DirectIO && !pFP->IsSkipBlockCksum()) || pFP->HasHoles())
         {
             auto truncate_res = pFP->TruncateDstToSrcSize();
             if (!truncate_res)
@@ -346,7 +392,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
             }
         }
 
-        if (mOptions.PreserveMeta && !pFP->IsSkipBlockCksum())
+        if (mOptions.PreserveMeta)
         {
             if (mOptions.CopyMode == "CksumOnly")
             {
@@ -357,7 +403,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                                   pFP->GetSrcPath(), diff_res.error().ToString());
                 }
             }
-            else
+            else if (!pFP->IsSkipBlockCksum())
             {
                 auto meta_res = pFP->PreserveMetadata();
                 if (!meta_res)
@@ -412,7 +458,17 @@ void CPFilePair::EmitMetaWarning(const std::string &metaType, int err)
 tl::expected<void, StackError> CPFilePair::PreserveMode()
 {
     mode_t mode = mSrcStat.st_mode & 07777;
-    if (mDstFd >= 0)
+    if (mIsSymlink)
+    {
+#ifdef __APPLE__
+        if (lchmod(mDstPath.c_str(), mode) < 0)
+            return tl::unexpected(StackError("lchmod failed", errno));
+#else
+        // Linux: symlink mode is always 0777, nothing to preserve
+        (void)mode;
+#endif
+    }
+    else if (mDstFd >= 0)
     {
         if (fchmod(mDstFd, mode) < 0)
             return tl::unexpected(StackError("fchmod failed", errno));
@@ -611,6 +667,10 @@ void CPFilePair::EmitCksumResult(const std::string &result,
                                  size_t offset,
                                  const std::string &detail)
 {
+    if (result == "mismatch")
+    {
+        mMetaMismatchEmitted = true;
+    }
     if (mReporter)
     {
         mReporter->FileCksumResult(mSrcPath, mDstPath, result, reason, offset, detail);
@@ -619,6 +679,8 @@ void CPFilePair::EmitCksumResult(const std::string &result,
 
 tl::expected<void, StackError> CPFilePair::CompareMetadata()
 {
+    mMetaMismatchEmitted = false;
+
     struct stat dstStat;
     if (lstat(mDstPath.c_str(), &dstStat) < 0)
     {
@@ -631,6 +693,11 @@ tl::expected<void, StackError> CPFilePair::CompareMetadata()
     CompareTimestamps(dstStat);
     CompareXattr(dstStat);
     CompareAcl(dstStat);
+
+    if (!mMetaMismatchEmitted && mSkipBlockCksum)
+    {
+        EmitCksumResult("match", "meta_match");
+    }
 
     return {};
 }
@@ -936,5 +1003,21 @@ tl::expected<void, StackError> CPFilePair::CompareAcl(const struct stat &dstStat
         acl_free(dstText);
     }
 #endif
+    return {};
+}
+
+tl::expected<void, StackError> CPFilePair::SkipWriteAsHole(size_t bytes)
+{
+    mHasHoles = true;
+    UpdateWrittenBytes(bytes);
+
+    if (IsWriteFinished())
+    {
+        if (ftruncate(mDstFd, mSrcStat.st_size) < 0)
+        {
+            return tl::unexpected(StackError(
+                fmt::format("ftruncate for sparse file failed: {}, errno: {}", mDstPath, errno)));
+        }
+    }
     return {};
 }

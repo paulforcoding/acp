@@ -106,7 +106,7 @@ TEST_CASE("LoadCopyOptions defaults", "[config]")
     REQUIRE(opt->CksumAlgorithm == "xxhash64"); // default
     REQUIRE(opt->DirectIO == false);            // default
     REQUIRE(opt->EnableInotify == false);       // default
-    REQUIRE(opt->PreserveSparseFiles == false); // default
+    REQUIRE(opt->PreserveSparseFiles == true);  // default (matches GNU cp --sparse=auto)
 
     fs::remove(cfg);
 }

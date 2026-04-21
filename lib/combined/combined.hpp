@@ -134,6 +134,9 @@ public:
     bool IsDir() const { return mIsDir; }
     bool IsSymlink() const { return mIsSymlink; }
     bool IsSkipBlockCksum() const { return mSkipBlockCksum; }
+    bool IsProbablySparse() const { return mIsProbablySparse; }
+    bool HasHoles() const { return mHasHoles; }
+    tl::expected<void, StackError> SkipWriteAsHole(size_t bytes);
 
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
@@ -172,6 +175,9 @@ private:
     bool mSkipBlockCksum = false;
 
     bool mIsChksumError = false;
+    bool mMetaMismatchEmitted = false;
+    bool mIsProbablySparse = false;
+    bool mHasHoles = false;
 
     bool mIsInflight = false;
     bool mIsCompleted = false;
@@ -197,6 +203,24 @@ private:
                          size_t offset = 0,
                          const std::string &detail = "");
 };
+
+// Helper: check if a buffer is entirely zero bytes (used by sparse copy).
+inline bool IsAllZeros(const char *buf, size_t len)
+{
+    const uint64_t *p64 = reinterpret_cast<const uint64_t *>(buf);
+    size_t n64 = len / 8;
+    for (size_t i = 0; i < n64; ++i)
+    {
+        if (p64[i] != 0)
+            return false;
+    }
+    for (size_t i = n64 * 8; i < len; ++i)
+    {
+        if (buf[i] != 0)
+            return false;
+    }
+    return true;
+}
 
 class CPFilePairMgr
 {
@@ -958,8 +982,26 @@ protected:
 
         if (mOptions.CopyMode == "CopyOnly")
         {
-            // prepare write io using the actual bytes read
-            PrepareOneWrite(slot);
+            if (mOptions.PreserveSparseFiles &&
+                slot->GetCPFPPtr()->IsProbablySparse() &&
+                IsAllZeros(slot->GetBuf(), static_cast<size_t>(io_ret)))
+            {
+                mLogger->debug("Sparse hole detected at offset: {} size: {} for src: {}, dst: {}",
+                               offset, io_ret,
+                               slot->GetCPFPPtr()->GetSrcPath(),
+                               slot->GetCPFPPtr()->GetDstPath());
+                auto skip_res = slot->GetCPFPPtr()->SkipWriteAsHole(static_cast<size_t>(io_ret));
+                if (!skip_res)
+                {
+                    return tl::unexpected(StackError("SkipWriteAsHole() err: ", skip_res.error()));
+                }
+                slot->Reset();
+            }
+            else
+            {
+                // prepare write io using the actual bytes read
+                PrepareOneWrite(slot);
+            }
         }
         else if (mOptions.CopyMode == "CksumCopy")
         {
@@ -989,7 +1031,25 @@ protected:
 
                 if (!match) // mismatch, act like we've done the write using rw slot
                 {
-                    PrepareOneWrite(ioSlot);
+                    if (mOptions.PreserveSparseFiles &&
+                        ioSlot->GetCPFPPtr()->IsProbablySparse() &&
+                        IsAllZeros(ioSlot->GetBuf(), ioSlot->GetIOInfo().io_size))
+                    {
+                        mLogger->debug("Sparse hole detected at offset: {} size: {} for src: {}, dst: {}",
+                                       offset, ioSlot->GetIOInfo().io_size,
+                                       ioSlot->GetCPFPPtr()->GetSrcPath(),
+                                       ioSlot->GetCPFPPtr()->GetDstPath());
+                        auto skip_res = ioSlot->GetCPFPPtr()->SkipWriteAsHole(ioSlot->GetIOInfo().io_size);
+                        if (!skip_res)
+                        {
+                            return tl::unexpected(StackError("SkipWriteAsHole() after cksum mismatch, err: ", skip_res.error()));
+                        }
+                        ioSlot->Reset();
+                    }
+                    else
+                    {
+                        PrepareOneWrite(ioSlot);
+                    }
                 }
                 else // match , act just like we've done the write
                 {

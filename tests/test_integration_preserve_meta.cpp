@@ -183,11 +183,7 @@ static void set_file_times(const fs::path &p, time_t sec, long nsec)
     times[0].tv_nsec = nsec;
     times[1].tv_sec = sec;
     times[1].tv_nsec = nsec;
-#ifdef __APPLE__
-    REQUIRE(::utimensat(AT_FDCWD, p.c_str(), times, 0) == 0);
-#else
-    REQUIRE(::utimensat(AT_FDCWD, p.c_str(), times, 0) == 0);
-#endif
+    REQUIRE(::utimensat(AT_FDCWD, p.c_str(), times, AT_SYMLINK_NOFOLLOW) == 0);
 }
 
 // 设置 xattr（平台适配）
@@ -287,6 +283,75 @@ TEST_CASE("PM-05: timestamp not preserved then CksumOnly reports timestamp_misma
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
     REQUIRE(has_event_with(output, "cksum_result", "reason", "timestamp_mismatch"));
+
+    std::error_code ec;
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
+
+TEST_CASE("PM-06: symlink metadata preserved then CksumOnly match", "[preserve_meta]")
+{
+    fs::path src_dir = fs::path("testdata") / "pm06_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_pm06_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    write_file_exact(src_dir / "target.dat", 1024, 'S');
+    std::error_code ec;
+    fs::create_symlink(src_dir / "target.dat", src_dir / "link.dat", ec);
+    REQUIRE(!ec);
+    set_file_times(src_dir / "link.dat", 1609459200, 123456789);
+
+    REQUIRE(run_copy_only(src_dir, dst_dir, true) == 0);
+
+    std::string output = run_cksum_only(src_dir, dst_dir);
+    REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
+    // atime may differ because reading src updates it; only check critical metadata
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "owner_mismatch"));
+
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
+
+TEST_CASE("PM-07: dangling symlink metadata then CksumOnly match", "[preserve_meta]")
+{
+    fs::path src_dir = fs::path("testdata") / "pm07_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_pm07_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    std::error_code ec;
+    fs::create_symlink("/nonexistent/path", src_dir / "dangling.dat", ec);
+    REQUIRE(!ec);
+    set_file_times(src_dir / "dangling.dat", 1609459200, 123456789);
+
+    REQUIRE(run_copy_only(src_dir, dst_dir, true) == 0);
+
+    std::string output = run_cksum_only(src_dir, dst_dir);
+    REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "result", "mismatch"));
+
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
+
+TEST_CASE("PM-08: directory metadata preserved then CksumOnly match", "[preserve_meta]")
+{
+    fs::path src_dir = fs::path("testdata") / "pm08_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_pm08_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    fs::create_directories(src_dir / "subdir");
+    set_file_times(src_dir / "subdir", 1609459200, 123456789);
+
+    REQUIRE(run_copy_only(src_dir, dst_dir, true) == 0);
+
+    std::string output = run_cksum_only(src_dir, dst_dir);
+    REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "result", "mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);

@@ -44,7 +44,7 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
         options.CopyChanSize = data.at("CopyChanSize").get<int>();
         options.DirectIO = data.value("DirectIO", false);
         options.EnableInotify = data.value("EnableInotify", false);
-        options.PreserveSparseFiles = data.value("PreserveSparseFiles", false);
+        options.PreserveSparseFiles = data.value("PreserveSparseFiles", true);
         options.PreserveMeta = data.value("PreserveMeta", true);
 
         if (options.IoSize == 0)
