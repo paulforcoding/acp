@@ -70,7 +70,7 @@ public:
     std::string str() const { return mBuffer.str(); }
 };
 
-static bool has_event(const std::string &output, const std::string &event_type)
+[[maybe_unused]] static bool has_event(const std::string &output, const std::string &event_type)
 {
     std::istringstream iss(output);
     std::string line;

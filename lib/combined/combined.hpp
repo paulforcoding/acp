@@ -65,9 +65,7 @@ class CPFilePair
 public:
     CPFilePair(std::string_view src_path,
                std::string_view dst_path,
-               size_t io_size,
                bool direct_io,
-               bool sync_writes,
                bool cksum,
                bool cksum_only,
                bool preserve_meta,
@@ -164,9 +162,9 @@ private:
 
     size_t mReadBytes = 0;
     size_t mWrittenBytes = 0;
-    size_t mIOSize = 0;
+#ifdef O_DIRECT
     bool mDirectIO = false;
-    bool mSyncWrites = false;
+#endif
     bool mCksum = false;
     bool mCksumOnly = false;
     bool mPreserveMeta = false;
@@ -235,9 +233,7 @@ public:
     {
         mChannel.Push(std::make_shared<CPFilePair>(src_path,
                        dst_path,
-                       mOptions.IoSize,
                        mOptions.DirectIO,
-                       mOptions.SyncWrites,
                        (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
                        (mOptions.CopyMode == "CksumOnly"),
                        mOptions.PreserveMeta,

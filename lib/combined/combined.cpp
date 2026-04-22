@@ -11,9 +11,7 @@
 
 CPFilePair::CPFilePair(std::string_view src_path,
                        std::string_view dst_path,
-                       size_t io_size,
                        bool direct_io,
-                       bool sync_writes,
                        bool cksum,
                        bool cksum_only,
                        bool preserve_meta,
@@ -21,9 +19,9 @@ CPFilePair::CPFilePair(std::string_view src_path,
                        FileLogReporter* reporter)
     : mSrcPath(src_path),
       mDstPath(dst_path),
-      mIOSize(io_size),
+#ifdef O_DIRECT
       mDirectIO(direct_io),
-      mSyncWrites(sync_writes),
+#endif
       mCksum(cksum),
       mCksumOnly(cksum_only),
       mPreserveMeta(preserve_meta),
@@ -32,6 +30,9 @@ CPFilePair::CPFilePair(std::string_view src_path,
 {
     memset(&mSrcStat, 0, sizeof(struct stat));
     memset(&mDstStat, 0, sizeof(struct stat));
+#ifndef O_DIRECT
+    (void)direct_io;
+#endif
 }
 
 tl::expected<void, StackError> CPFilePair::CheckAndInit()
@@ -734,13 +735,9 @@ tl::expected<void, StackError> CPFilePair::CompareTimestamps(const struct stat &
 #ifdef __APPLE__
     auto srcMtime = mSrcStat.st_mtimespec;
     auto dstMtime = dstStat.st_mtimespec;
-    auto srcAtime = mSrcStat.st_atimespec;
-    auto dstAtime = dstStat.st_atimespec;
 #else
     auto srcMtime = mSrcStat.st_mtim;
     auto dstMtime = dstStat.st_mtim;
-    auto srcAtime = mSrcStat.st_atim;
-    auto dstAtime = dstStat.st_atim;
 #endif
 
     if (srcMtime.tv_sec != dstMtime.tv_sec || srcMtime.tv_nsec != dstMtime.tv_nsec)
@@ -752,7 +749,7 @@ tl::expected<void, StackError> CPFilePair::CompareTimestamps(const struct stat &
     return {};
 }
 
-tl::expected<void, StackError> CPFilePair::CompareXattr(const struct stat &dstStat)
+tl::expected<void, StackError> CPFilePair::CompareXattr([[maybe_unused]] const struct stat &dstStat)
 {
 #ifdef __APPLE__
     int srcFd = mSrcFd;
@@ -956,7 +953,7 @@ tl::expected<void, StackError> CPFilePair::CompareXattr(const struct stat &dstSt
     return {};
 }
 
-tl::expected<void, StackError> CPFilePair::CompareAcl(const struct stat &dstStat)
+tl::expected<void, StackError> CPFilePair::CompareAcl([[maybe_unused]] const struct stat &dstStat)
 {
 #ifdef HAS_LIBACL
     if (mSrcFd < 0)

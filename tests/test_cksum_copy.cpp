@@ -32,7 +32,7 @@ static void ensure_clean_dir(const fs::path &p)
     REQUIRE(!ec);
 }
 
-static bool files_equal(const fs::path &a, const fs::path &b)
+[[maybe_unused]] static bool files_equal(const fs::path &a, const fs::path &b)
 {
     if (!fs::exists(a) || !fs::exists(b))
         return false;

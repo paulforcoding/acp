@@ -39,7 +39,7 @@ TEST_CASE("CPFilePair CheckAndInit skips socket file", "[integration][cpfilepair
     opts.ProgramLogMode = "file";
     opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
-    CPFilePair p(src_sock, dst_sock, opts.IoSize, opts.DirectIO, opts.SyncWrites, /*cksum*/ false, false, false, logger, nullptr);
+    CPFilePair p(src_sock, dst_sock, opts.DirectIO, /*cksum*/ false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE_FALSE(init_res.has_value());
     REQUIRE(init_res.error().Code() == ENOTSUP);
@@ -78,7 +78,7 @@ TEST_CASE("CPFilePair CheckAndInit with real file", "[integration][cpfilepair]")
     opts.ProgramLogMode = "file";
     opts.ProgramLogFilePath = "/tmp/acp_program.log";
 
-    CPFilePair p(src, dst, opts.IoSize, opts.DirectIO, opts.SyncWrites, /*cksum*/ false, false, false, logger, nullptr);
+    CPFilePair p(src, dst, opts.DirectIO, /*cksum*/ false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE(init_res.has_value());
 
