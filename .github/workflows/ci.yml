@@ -156,11 +156,11 @@ jobs:
           path: build/acp
 
   # ---------------------------------------------------------------------------
-  # macOS 14 (GCD backend)
+  # macOS 15 (GCD backend)
   # ---------------------------------------------------------------------------
   build-macos:
-    name: macOS 14 (Clang, GCD backend)
-    runs-on: macos-14
+    name: macOS 15 (Clang, GCD backend)
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
 
