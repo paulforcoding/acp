@@ -4,8 +4,10 @@
 #ifdef __APPLE__
 #include "lib/gcd/gcd.hpp"
 #else
-#include "lib/ucp/ucp.hpp"
 #include "lib/acp/acp.hpp"
+#ifdef ENABLE_LIBURING
+#include "lib/ucp/ucp.hpp"
+#endif
 #endif
 
 class CopyEngine
@@ -84,7 +86,12 @@ private:
 #else
         if (mOptions.CopyEngine == "liburing")
         {
+#ifdef ENABLE_LIBURING
             slotMgr = std::make_unique<UIOSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
+#else
+            mLogger->error("liburing support not compiled in, falling back to libaio");
+            slotMgr = std::make_unique<AIOSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
+#endif
         }
         else
         {
