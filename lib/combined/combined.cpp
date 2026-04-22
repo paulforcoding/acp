@@ -747,10 +747,8 @@ tl::expected<void, StackError> CPFilePair::CompareTimestamps(const struct stat &
     {
         EmitCksumResult("mismatch", "timestamp_mismatch", 0, "mtime");
     }
-    if (srcAtime.tv_sec != dstAtime.tv_sec || srcAtime.tv_nsec != dstAtime.tv_nsec)
-    {
-        EmitCksumResult("mismatch", "timestamp_mismatch", 0, "atime");
-    }
+    // atime is intentionally not compared: it changes on every read access
+    // and would cause false positives in CksumOnly mode
     return {};
 }
 

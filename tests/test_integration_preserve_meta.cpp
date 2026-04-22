@@ -567,7 +567,7 @@ TEST_CASE("PM-13: ACL preserved then CksumOnly match", "[preserve_meta]")
     ensure_clean_dir(dst_dir);
 
     write_file_exact(src_dir / "file.dat", 1024, 'O');
-    set_file_acl(src_dir / "file.dat", "u::rw,g::r,o::r\nu:nobody:rwx");
+    set_file_acl(src_dir / "file.dat", "user::rw-\ngroup::r--\nother::r--\nuser:nobody:rwx\nmask::rwx");
 
     REQUIRE(run_copy_only(src_dir, dst_dir, true) == 0);
 
@@ -588,7 +588,7 @@ TEST_CASE("PM-14: ACL not preserved then CksumOnly reports acl_mismatch", "[pres
     ensure_clean_dir(dst_dir);
 
     write_file_exact(src_dir / "file.dat", 1024, 'P');
-    set_file_acl(src_dir / "file.dat", "u::rw,g::r,o::r\nu:nobody:rwx");
+    set_file_acl(src_dir / "file.dat", "user::rw-\ngroup::r--\nother::r--\nuser:nobody:rwx\nmask::rwx");
 
     REQUIRE(run_copy_only(src_dir, dst_dir, false) == 0);
 
@@ -609,7 +609,7 @@ TEST_CASE("PM-23: manual ACL change then CksumOnly reports acl_mismatch", "[pres
     ensure_clean_dir(dst_dir);
 
     write_file_exact(src_dir / "file.dat", 1024, 'Q');
-    set_file_acl(src_dir / "file.dat", "u::rw,g::r,o::r\nu:nobody:rwx");
+    set_file_acl(src_dir / "file.dat", "user::rw-\ngroup::r--\nother::r--\nuser:nobody:rwx\nmask::rwx");
 
     REQUIRE(run_copy_only(src_dir, dst_dir, true) == 0);
 

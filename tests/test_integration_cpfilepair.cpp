@@ -2,6 +2,7 @@
 #include "lib/combined/combined.hpp"
 #include "base/logger.hpp"
 #include <filesystem>
+#include <fstream>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -51,16 +52,23 @@ TEST_CASE("CPFilePair CheckAndInit skips socket file", "[integration][cpfilepair
 TEST_CASE("CPFilePair CheckAndInit with real file", "[integration][cpfilepair]")
 {
     namespace fs = std::filesystem;
-    std::string src = "testdata/hello.txt";
-    REQUIRE(fs::exists(src));
-
+    std::string src_dir = "tests/tmp_src_hello";
+    std::string src = src_dir + "/hello.txt";
     std::string dst_dir = "tests/tmp_out";
     std::string dst = dst_dir + "/hello_copy.txt";
 
-    // cleanup
+    // cleanup and create src file
     std::error_code ec;
+    fs::remove_all(src_dir, ec);
     fs::remove_all(dst_dir, ec);
+    fs::create_directories(src_dir, ec);
     fs::create_directories(dst_dir, ec);
+    {
+        std::ofstream ofs(src);
+        REQUIRE(ofs.good());
+        ofs << "hello world";
+    }
+    REQUIRE(fs::exists(src));
 
     auto logger = std::make_shared<ConsoleLogger>();
     RWCombinedCopyOptions opts;
@@ -80,5 +88,6 @@ TEST_CASE("CPFilePair CheckAndInit with real file", "[integration][cpfilepair]")
     REQUIRE(fs::exists(dst));
 
     // cleanup
+    fs::remove_all(src_dir, ec);
     fs::remove_all(dst_dir, ec);
 }
