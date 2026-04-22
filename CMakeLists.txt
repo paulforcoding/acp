@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 # Build options
 # ---------------------------------------------------------------------------
-option(BUILD_STATIC "Build with static linking" ON)
+option(BUILD_STATIC "Build with static linking" OFF)
 option(ENABLE_LIBURING "Enable io_uring support (Linux only)" OFF)
 option(BUILD_TESTS "Build tests" ON)
 

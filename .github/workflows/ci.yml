@@ -1,0 +1,203 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Ubuntu 24.04
+  # ---------------------------------------------------------------------------
+  build-ubuntu:
+    name: Ubuntu 24.04 (${{ matrix.compiler }}, liburing=${{ matrix.liburing }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [gcc, clang]
+        liburing: [ON, OFF]
+        include:
+          - compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+          - compiler: clang
+            cc: clang-18
+            cxx: clang++-18
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            ccache \
+            libaio-dev \
+            liburing-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            libssl-dev \
+            libxxhash-dev \
+            libacl1-dev
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: ubuntu24-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-${{ github.sha }}
+          restore-keys: |
+            ubuntu24-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-
+
+      - name: Configure
+        run: |
+          export CC="${{ matrix.cc }}"
+          export CXX="${{ matrix.cxx }}"
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LIBURING=${{ matrix.liburing }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test (unit + light integration)
+        run: ctest --test-dir build --output-on-failure -E integration
+
+      - name: Test (full integration)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        timeout-minutes: 10
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload binary artifact
+        if: matrix.compiler == 'gcc' && matrix.liburing == 'ON'
+        uses: actions/upload-artifact@v4
+        with:
+          name: acp-ubuntu24-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}
+          path: build/acp
+
+  # ---------------------------------------------------------------------------
+  # CentOS Stream 9 (via Docker)
+  # ---------------------------------------------------------------------------
+  build-centos9:
+    name: CentOS Stream 9 (gcc, liburing=${{ matrix.liburing }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        liburing: [ON, OFF]
+    container:
+      image: quay.io/centos/centos:stream9
+      options: --privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            epel-release \
+            'dnf-command(config-manager)'
+          dnf config-manager --set-enabled crb
+          dnf install -y \
+            gcc \
+            gcc-c++ \
+            cmake \
+            ninja-build \
+            ccache \
+            libaio-devel \
+            liburing-devel \
+            spdlog-devel \
+            fmt-devel \
+            openssl-devel \
+            xxhash-devel \
+            libacl-devel
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: centos9-liburing-${{ matrix.liburing }}-${{ github.sha }}
+          restore-keys: |
+            centos9-liburing-${{ matrix.liburing }}-
+
+      - name: Configure
+        run: |
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_LIBURING=${{ matrix.liburing }} \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test (unit + light integration)
+        run: ctest --test-dir build --output-on-failure -E integration
+
+      - name: Test (full integration)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        timeout-minutes: 10
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload binary artifact
+        if: matrix.liburing == 'ON'
+        uses: actions/upload-artifact@v4
+        with:
+          name: acp-centos9-liburing-${{ matrix.liburing }}
+          path: build/acp
+
+  # ---------------------------------------------------------------------------
+  # macOS 14 (GCD backend)
+  # ---------------------------------------------------------------------------
+  build-macos:
+    name: macOS 14 (Clang, GCD backend)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          brew install \
+            cmake \
+            ninja \
+            ccache \
+            spdlog \
+            fmt \
+            openssl \
+            xxhash
+
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/ccache
+          key: macos14-clang-${{ github.sha }}
+          restore-keys: macos14-clang-
+
+      - name: Configure
+        run: |
+          export CCACHE_DIR="$HOME/Library/Caches/ccache"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j$(sysctl -n hw.ncpu)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: acp-macos14
+          path: build/acp
