@@ -201,6 +201,11 @@ if(BUILD_TESTS)
         list(FILTER TEST_SOURCES EXCLUDE REGEX "test_integration_direct_io")
     endif()
 
+    # Exclude liburing tests when liburing is disabled
+    if(NOT ENABLE_LIBURING)
+        list(FILTER TEST_SOURCES EXCLUDE REGEX "test_integration_liburing")
+    endif()
+
     # Test executable needs implementation objects (same as acp minus main.cpp)
     set(TEST_IMPL_SOURCES ${COMMON_SOURCES})
     list(REMOVE_ITEM TEST_IMPL_SOURCES main.cpp)
