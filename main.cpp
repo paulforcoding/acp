@@ -4,7 +4,7 @@
 #include <algorithm>
 #include "lib/mainlib.hpp"
 
-constexpr const char* kVersion = "0.3.0";
+constexpr const char* kVersion = "0.4.0";
 
 #ifdef __APPLE__
 constexpr const char* kPlatform = "macOS";

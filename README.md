@@ -25,7 +25,9 @@ High-performance file copy using Linux AIO / io_uring and macOS Grand Central Di
   - `CksumOnly` — verify without writing, results logged to `./cksum_result.log`
 - **Live Directory Sync** — optional `inotify` (Linux) / `FSEvents` (macOS) monitoring for continuous replication
 - **Direct I/O** support — bypass page cache for large sequential workloads
-- **Sparse File Preservation** — detect and preserve holes
+- **Sparse File Preservation** — detect and preserve holes (like `cp --sparse=auto`)
+- **Metadata Preservation** — preserve timestamps, mode, ownership, xattr, and ACL (optional via `PreserveMeta`)
+- **Dual Logging System** — independent `ProgramLog` (diagnostics) and `FileLog` (per-file progress telemetry) with separate mode/file-path controls
 - **Configurable Parallelism** — multiple copy threads with per-thread I/O queue depth
 - **Cross-Platform** — Linux and macOS
 
@@ -96,24 +98,26 @@ Example `acp_config.json`:
 ```json
 {
   "ProgramLogLevel": "info",
-  "ProgramLogMode": "console",
-  "ProgramLogFilePath": "./acp.log",
-  "FileLogEnabled": false,
+  "ProgramLogMode": "file",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": true,
+  "FileLogMode": "file",
   "FileLogIntervalSec": 5,
-  "FileLogPath": "./.acp_state.json",
+  "FileLogPath": "/tmp/acp_file_info.json",
   "CopyEngine": "libaio",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
-  "CopyParallelism": 4,
+  "CopyParallelism": 1,
   "CopyChanSize": 10,
   "EnableInotify": false,
-  "PreserveSparseFiles": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
   "DirectIO": false,
   "SyncWrites": false,
   "CopyOptions": {
     "IOSize": 1048576,
     "QueueDepth": 8,
-    "Batch": 4,
+    "Batch": 8,
     "IOReapWait": 1
   }
 }
@@ -123,12 +127,15 @@ Example `acp_config.json`:
 
 | Field | Description | Default |
 |-------|-------------|---------|
+| Field | Description | Default |
+|-------|-------------|---------|
 | `ProgramLogLevel` | `"trace"`, `"debug"`, `"info"`, `"warn"`, `"error"`, `"fatal"` | `"info"` |
-| `ProgramLogMode` | `"console"` or `"file"` | `"console"` |
-| `ProgramLogFilePath` | Program log file path (mode=file) | `"./acp.log"` |
+| `ProgramLogMode` | `"console"` or `"file"` | `"file"` |
+| `ProgramLogFilePath` | Program log file path (mode=file) | `"/tmp/acp_program.log"` |
 | `FileLogEnabled` | Enable structured file progress events | `false` |
+| `FileLogMode` | `"console"` or `"file"` | `"file"` |
 | `FileLogIntervalSec` | Progress summary interval in seconds | `5` |
-| `FileLogPath` | State file path (`""` to disable) | `"./.acp_state.json"` |
+| `FileLogPath` | NDJSON event log path (file mode) | `"/tmp/acp_file_info.json"` |
 | `CopyEngine` | `"libaio"`, `"liburing"` (Linux), `"gcd"` (macOS) | `"libaio"` |
 | `CopyMode` | `"CopyOnly"`, `"CksumCopy"`, `"CksumOnly"` | `"CopyOnly"` |
 | `CksumAlgorithm` | `"xxhash64"`, `"md5"`, `"sha256"` | `"xxhash64"` |
@@ -137,6 +144,8 @@ Example `acp_config.json`:
 | `QueueDepth` | Max in-flight I/Os per thread | `8` |
 | `DirectIO` | Use `O_DIRECT` bypassing page cache | `false` |
 | `SyncWrites` | `fsync` each file after completion | `false` |
+| `PreserveSparseFiles` | Preserve sparse file holes | `true` |
+| `PreserveMeta` | Preserve timestamps, mode, ownership, xattr, ACL | `false` |
 | `EnableInotify` | Monitor source for changes (never exits) | `false` |
 
 ## Usage
@@ -169,7 +178,7 @@ When copying a directory to a directory, `acp` creates a subdirectory inside the
 - **Small, one-off copies** — for a few KB or a handful of files, native `cp` is faster because `acp` has JSON parsing and thread-pool startup overhead.
 - **Cross-network copies** — `acp` is a pure local-file copy tool. It does not speak `scp`, `rsync`, `sftp`, or any network protocol.
 - **Special file replication** — device files, sockets, FIFOs, and whiteout files are skipped (logged as unsupported). Use `cp -a` or `rsync` if you need these.
-- **Precise metadata preservation** — `acp` does not preserve timestamps, permissions, ACLs, or extended attributes (`xattr`). It focuses on throughput, not archive fidelity.
+- **Archive-level metadata fidelity** — while `PreserveMeta` preserves basic metadata (timestamps, mode, ownership, xattr, ACL), it may not match `cp -a` or `rsync -a` in every edge case (e.g., SELinux contexts, sub-second precision on all filesystems).
 - **Interactive or scripted single-file operations** — where `cp` simplicity and immediate exit semantics are preferred.
 
 ## Copy Modes Explained
@@ -198,9 +207,13 @@ ctest --test-dir build --output-on-failure
 
 # Exclude slow integration tests (large dataset)
 ./build/test_acp "~[integration]"
+
+# Run with JSON reporter and parse results
+./build/test_acp --reporter json -s -d yes > test_results.json
+python3 tests/parse_test_results.py test_results.json
 ```
 
-Tests cover `Channel`, `CPFilePair`, `CPFilePairMgr`, `IOSlot`, `CksumCopy`, `CksumOnly`, `liburing`, `DirectIO`, `SyncWrites`, `Inotify`, and end-to-end integration scenarios.
+Tests cover `Channel`, `CPFilePair`, `CPFilePairMgr`, `IOSlot`, `CksumCopy`, `CksumOnly`, `liburing`, `DirectIO`, `SyncWrites`, `PreserveMeta`, `Inotify`, and end-to-end integration scenarios.
 
 ## Docker (Recommended for Development)
 
