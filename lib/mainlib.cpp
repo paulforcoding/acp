@@ -130,10 +130,10 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 #else
     Inotify inotifyWatcher(src_p.string(), logger);
 #endif
-    std::jthread inotifyThread;
+    std::thread inotifyThread;
+    std::atomic<bool> inotifyStopRequested{false};
     if (options.EnableInotify)
     {
-
         auto add_watch_res = inotifyWatcher.Init();
         if (!add_watch_res)
         {
@@ -141,10 +141,10 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             return 1;
         }
         // start a thread to read inotify events and push to copyChannel
-        inotifyThread = std::jthread(
-            [&inotifyWatcher, &iChan, logger](std::stop_token st)
+        inotifyThread = std::thread(
+            [&inotifyWatcher, &iChan, logger, &inotifyStopRequested]()
             {
-                while (!st.stop_requested())
+                while (!inotifyStopRequested.load())
                 {
                     auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
                     if (!read_res)
@@ -276,6 +276,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             copyChannel.Push(copy_entry);
         }
         // main() never exits normally when inotify is enabled
+        inotifyStopRequested.store(true);
         inotifyThread.join();
     }
 
