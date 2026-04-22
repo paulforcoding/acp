@@ -13,17 +13,27 @@
 
 #include "base/base.hpp"
 
-// FileLogReporter: 输出 file_info 事件到 stdout（NDJSON），并维护状态文件。
+// FileLogReporter: 输出 file_info 事件（NDJSON）和状态快照。
+// 当 FileLogMode="console" 时，事件走 stdout，状态快照原子覆盖写入 stateFilePath。
+// 当 FileLogMode="file" 时，事件和状态快照都追加写入 fileLogPath（同一个文件）。
 // 所有统计使用原子变量，事件输出使用独立 mutex（不与 I/O 队列竞争）。
 class FileLogReporter
 {
 public:
-    FileLogReporter(bool enabled, int intervalSec, std::string stateFilePath)
+    FileLogReporter(bool enabled, const std::string& fileLogMode, int intervalSec,
+                    const std::string& fileLogPath, const std::string& stateFilePath)
         : mEnabled(enabled),
+          mFileLogMode(fileLogMode),
           mIntervalSec(intervalSec),
-          mStateFilePath(std::move(stateFilePath)),
+          mFileLogPath(fileLogPath),
+          mStateFilePath(stateFilePath),
           mStartTime(std::chrono::steady_clock::now())
     {
+        if (mEnabled && mFileLogMode == "file" && !mFileLogPath.empty())
+        {
+            // 以追加模式打开，确保文件存在
+            std::ofstream ofs(mFileLogPath, std::ios::app);
+        }
     }
 
     // --- 事件发射 ---
@@ -59,6 +69,40 @@ public:
             return;
         EmitEvent(fmt::format("{{\"type\":\"file_info\",\"event\":\"file_unsupported\",\"src\":\"{}\",\"type\":\"{}\",\"action\":\"{}\",\"timestamp\":\"{}\"}}",
                               EscapeJsonString(src), EscapeJsonString(fileType), action, CurrentIsoTimestamp()));
+    }
+
+    void FileMetaWarning(const std::string &src,
+                         const std::string &metaType,
+                         const std::string &error,
+                         int errnoCode)
+    {
+        if (!mEnabled)
+            return;
+        EmitEvent(fmt::format(
+            "{{\"type\":\"file_info\",\"event\":\"meta_warning\","
+            "\"src\":\"{}\",\"meta_type\":\"{}\",\"error\":\"{}\","
+            "\"errno\":{},\"timestamp\":\"{}\"}}",
+            EscapeJsonString(src), metaType, EscapeJsonString(error),
+            errnoCode, CurrentIsoTimestamp()));
+    }
+
+    void FileCksumResult(const std::string &src,
+                         const std::string &dst,
+                         const std::string &result,
+                         const std::string &reason,
+                         size_t offset = 0,
+                         const std::string &detail = "")
+    {
+        if (!mEnabled)
+            return;
+        EmitEvent(fmt::format(
+            "{{\"type\":\"file_info\",\"event\":\"cksum_result\","
+            "\"src\":\"{}\",\"dst\":\"{}\",\"result\":\"{}\",\"reason\":\"{}\","
+            "\"offset\":{},\"detail\":\"{}\",\"timestamp\":\"{}\"}}",
+            EscapeJsonString(src), EscapeJsonString(dst),
+            result, EscapeJsonString(reason),
+            offset, EscapeJsonString(detail),
+            CurrentIsoTimestamp()));
     }
 
     void CopyPlan(const std::string &scanState,
@@ -141,7 +185,7 @@ public:
 
     void UpdateStateFile()
     {
-        if (!mEnabled || mStateFilePath.empty())
+        if (!mEnabled)
             return;
 
         size_t total = mFilesTotal.load(std::memory_order_relaxed);
@@ -159,21 +203,37 @@ public:
             currentFile = mCurrentFile;
         }
 
-        std::string content = fmt::format(
-            "{{\"pid\":{},\"state\":\"running\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":{:.1f},\"current_file\":\"{}\",\"last_update\":\"{}\"}}\n",
-            static_cast<int>(getpid()),
-            mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
-            total, done, bytesTotal, bytesDone,
-            speedMbps,
-            EscapeJsonString(currentFile),
-            CurrentIsoTimestamp());
-
-        WriteStateFileAtomic(content);
+        if (mFileLogMode == "file" && !mFileLogPath.empty())
+        {
+            // file mode: 追加 NDJSON 行到同一个日志文件
+            std::string content = fmt::format(
+                "{{\"type\":\"file_info\",\"event\":\"state_snapshot\",\"pid\":{},\"state\":\"running\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":{:.1f},\"current_file\":\"{}\",\"last_update\":\"{}\"}}\n",
+                static_cast<int>(getpid()),
+                mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
+                total, done, bytesTotal, bytesDone,
+                speedMbps,
+                EscapeJsonString(currentFile),
+                CurrentIsoTimestamp());
+            AppendToLogFile(content);
+        }
+        else if (!mStateFilePath.empty())
+        {
+            // console mode: 原子覆盖写入状态文件
+            std::string content = fmt::format(
+                "{{\"pid\":{},\"state\":\"running\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":{:.1f},\"current_file\":\"{}\",\"last_update\":\"{}\"}}\n",
+                static_cast<int>(getpid()),
+                mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
+                total, done, bytesTotal, bytesDone,
+                speedMbps,
+                EscapeJsonString(currentFile),
+                CurrentIsoTimestamp());
+            WriteStateFileAtomic(content);
+        }
     }
 
     void FinalizeStateFile()
     {
-        if (!mEnabled || mStateFilePath.empty())
+        if (!mEnabled)
             return;
 
         size_t total = mFilesTotal.load(std::memory_order_relaxed);
@@ -181,21 +241,51 @@ public:
         size_t bytesTotal = mBytesTotal.load(std::memory_order_relaxed);
         size_t bytesDone = mBytesDone.load(std::memory_order_relaxed);
 
-        std::string content = fmt::format(
-            "{{\"pid\":{},\"state\":\"completed\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":0.0,\"current_file\":\"\",\"last_update\":\"{}\"}}\n",
-            static_cast<int>(getpid()),
-            mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
-            total, done, bytesTotal, bytesDone,
-            CurrentIsoTimestamp());
-
-        WriteStateFileAtomic(content);
+        if (mFileLogMode == "file" && !mFileLogPath.empty())
+        {
+            std::string content = fmt::format(
+                "{{\"type\":\"file_info\",\"event\":\"state_snapshot\",\"pid\":{},\"state\":\"completed\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":0.0,\"current_file\":\"\",\"last_update\":\"{}\"}}\n",
+                static_cast<int>(getpid()),
+                mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
+                total, done, bytesTotal, bytesDone,
+                CurrentIsoTimestamp());
+            AppendToLogFile(content);
+        }
+        else if (!mStateFilePath.empty())
+        {
+            std::string content = fmt::format(
+                "{{\"pid\":{},\"state\":\"completed\",\"start_time\":\"{}\",\"files_total\":{},\"files_done\":{},\"bytes_total\":{},\"bytes_done\":{},\"current_speed_mbps\":0.0,\"current_file\":\"\",\"last_update\":\"{}\"}}\n",
+                static_cast<int>(getpid()),
+                mStartIsoTime.empty() ? CurrentIsoTimestamp() : mStartIsoTime,
+                total, done, bytesTotal, bytesDone,
+                CurrentIsoTimestamp());
+            WriteStateFileAtomic(content);
+        }
     }
 
 private:
     void EmitEvent(const std::string &jsonLine)
     {
         std::lock_guard<std::mutex> lock(mEmitMutex);
-        std::cout << jsonLine << '\n';
+        if (mFileLogMode == "file" && !mFileLogPath.empty())
+        {
+            AppendToLogFile(jsonLine + "\n");
+        }
+        else
+        {
+            std::cout << jsonLine << '\n';
+        }
+    }
+
+    void AppendToLogFile(const std::string &content)
+    {
+        std::lock_guard<std::mutex> lock(mFileMutex);
+        std::ofstream ofs(mFileLogPath, std::ios::app);
+        if (ofs)
+        {
+            ofs << content;
+            ofs.flush();
+        }
     }
 
     void WriteStateFileAtomic(const std::string &content)
@@ -211,7 +301,9 @@ private:
     }
 
     bool mEnabled;
+    std::string mFileLogMode;
     int mIntervalSec;
+    std::string mFileLogPath;
     std::string mStateFilePath;
     std::chrono::steady_clock::time_point mStartTime;
     std::chrono::steady_clock::time_point mLastSummaryTime;
@@ -226,4 +318,5 @@ private:
     std::string mCurrentFile;
 
     std::mutex mEmitMutex;
+    std::mutex mFileMutex;
 };

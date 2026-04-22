@@ -39,6 +39,7 @@ struct RWCombinedCopyOptions
     std::string ProgramLogMode;
     std::string ProgramLogFilePath;
     bool FileLogEnabled = false;
+    std::string FileLogMode;        // "console" or "file", default: "file"
     int FileLogIntervalSec = 5;
     std::string FileLogPath;
     std::string CopyEngine;
@@ -48,6 +49,7 @@ struct RWCombinedCopyOptions
     int CopyChanSize = 10;
     bool EnableInotify = false;
     bool PreserveSparseFiles = false;
+    bool PreserveMeta = true;
     bool DirectIO = false;
     bool SyncWrites = false;
     size_t IoSize = 1 * 1024 * 1024; // 1MB
@@ -67,6 +69,8 @@ public:
                bool direct_io,
                bool sync_writes,
                bool cksum,
+               bool cksum_only,
+               bool preserve_meta,
                std::shared_ptr<ILogger> logger,
                FileLogReporter* reporter); // full path expected
     ~CPFilePair()
@@ -83,6 +87,8 @@ public:
         }
     }
     tl::expected<void, StackError> CheckAndInit();
+    tl::expected<void, StackError> PreserveMetadata();
+    tl::expected<void, StackError> CompareMetadata();
     tl::expected<void, StackError> TruncateDstToSrcSize()
     {
         if (ftruncate(mDstFd, mSrcStat.st_size) < 0)
@@ -125,9 +131,13 @@ public:
     }
     void SetReadFinished() { mReadBytes = GetSrcFileSize(); }
     void SetWriteFinished() { mWrittenBytes = GetSrcFileSize(); }
-    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir() || IsSymlink(); }
+    bool IsInitialized() const { return (mSrcFd >= 0 && mDstFd >= 0) || IsDir() || IsSymlink() || mSkipBlockCksum; }
     bool IsDir() const { return mIsDir; }
     bool IsSymlink() const { return mIsSymlink; }
+    bool IsSkipBlockCksum() const { return mSkipBlockCksum; }
+    bool IsProbablySparse() const { return mIsProbablySparse; }
+    bool HasHoles() const { return mHasHoles; }
+    tl::expected<void, StackError> SkipWriteAsHole(size_t bytes);
 
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
@@ -158,11 +168,17 @@ private:
     bool mDirectIO = false;
     bool mSyncWrites = false;
     bool mCksum = false;
+    bool mCksumOnly = false;
+    bool mPreserveMeta = false;
 
     bool mIsDir = false;
     bool mIsSymlink = false;
+    bool mSkipBlockCksum = false;
 
     bool mIsChksumError = false;
+    bool mMetaMismatchEmitted = false;
+    bool mIsProbablySparse = false;
+    bool mHasHoles = false;
 
     bool mIsInflight = false;
     bool mIsCompleted = false;
@@ -170,7 +186,42 @@ private:
     std::shared_ptr<ILogger> mLogger;
     FileLogReporter* mReporter = nullptr;
     std::chrono::steady_clock::time_point mStartTime;
+
+    tl::expected<void, StackError> PreserveMode();
+    tl::expected<void, StackError> PreserveOwnership();
+    tl::expected<void, StackError> PreserveTimestamps();
+    tl::expected<void, StackError> PreserveXattr();
+    tl::expected<void, StackError> PreserveAcl();
+    void EmitMetaWarning(const std::string &metaType, int err);
+
+    tl::expected<void, StackError> CompareMode(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareOwnership(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareTimestamps(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareXattr(const struct stat &dstStat);
+    tl::expected<void, StackError> CompareAcl(const struct stat &dstStat);
+    void EmitCksumResult(const std::string &result,
+                         const std::string &reason,
+                         size_t offset = 0,
+                         const std::string &detail = "");
 };
+
+// Helper: check if a buffer is entirely zero bytes (used by sparse copy).
+inline bool IsAllZeros(const char *buf, size_t len)
+{
+    const uint64_t *p64 = reinterpret_cast<const uint64_t *>(buf);
+    size_t n64 = len / 8;
+    for (size_t i = 0; i < n64; ++i)
+    {
+        if (p64[i] != 0)
+            return false;
+    }
+    for (size_t i = n64 * 8; i < len; ++i)
+    {
+        if (buf[i] != 0)
+            return false;
+    }
+    return true;
+}
 
 class CPFilePairMgr
 {
@@ -188,6 +239,8 @@ public:
                        mOptions.DirectIO,
                        mOptions.SyncWrites,
                        (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly"),
+                       (mOptions.CopyMode == "CksumOnly"),
+                       mOptions.PreserveMeta,
                        mLogger,
                        mReporter));
         return {};
@@ -391,14 +444,6 @@ public:
                 mDigest = std::make_unique<XXHash64Digest>();
             }
 
-            if (options.CopyMode == "CksumOnly")
-            {
-                mCksumResultFile.open("./cksum_result.log", std::ios::out | std::ios::trunc);
-                if (!mCksumResultFile.is_open())
-                {
-                    throw std::runtime_error("Failed to open/create ./cksum_result.log for writing checksum results.");
-                }
-            }
         }
     }
     virtual ~IOSlotMgr() = default;
@@ -938,8 +983,31 @@ protected:
 
         if (mOptions.CopyMode == "CopyOnly")
         {
-            // prepare write io using the actual bytes read
-            PrepareOneWrite(slot);
+            if (mOptions.PreserveSparseFiles &&
+                slot->GetCPFPPtr()->IsProbablySparse() &&
+                IsAllZeros(slot->GetBuf(), static_cast<size_t>(io_ret)))
+            {
+                mLogger->debug("Sparse hole detected at offset: {} size: {} for src: {}, dst: {}",
+                               offset, io_ret,
+                               slot->GetCPFPPtr()->GetSrcPath(),
+                               slot->GetCPFPPtr()->GetDstPath());
+                auto skip_res = slot->GetCPFPPtr()->SkipWriteAsHole(static_cast<size_t>(io_ret));
+                if (!skip_res)
+                {
+                    return tl::unexpected(StackError("SkipWriteAsHole() err: ", skip_res.error()));
+                }
+                auto check_res = mCPFPMgr->CheckWriteComplete(slot->GetCPFPPtr());
+                if (!check_res)
+                {
+                    return tl::unexpected(StackError("CheckWriteComplete after SkipWriteAsHole, err: ", check_res.error()));
+                }
+                slot->Reset();
+            }
+            else
+            {
+                // prepare write io using the actual bytes read
+                PrepareOneWrite(slot);
+            }
         }
         else if (mOptions.CopyMode == "CksumCopy")
         {
@@ -969,7 +1037,30 @@ protected:
 
                 if (!match) // mismatch, act like we've done the write using rw slot
                 {
-                    PrepareOneWrite(ioSlot);
+                    if (mOptions.PreserveSparseFiles &&
+                        ioSlot->GetCPFPPtr()->IsProbablySparse() &&
+                        IsAllZeros(ioSlot->GetBuf(), ioSlot->GetIOInfo().io_size))
+                    {
+                        mLogger->debug("Sparse hole detected at offset: {} size: {} for src: {}, dst: {}",
+                                       offset, ioSlot->GetIOInfo().io_size,
+                                       ioSlot->GetCPFPPtr()->GetSrcPath(),
+                                       ioSlot->GetCPFPPtr()->GetDstPath());
+                        auto skip_res = ioSlot->GetCPFPPtr()->SkipWriteAsHole(ioSlot->GetIOInfo().io_size);
+                        if (!skip_res)
+                        {
+                            return tl::unexpected(StackError("SkipWriteAsHole() after cksum mismatch, err: ", skip_res.error()));
+                        }
+                        auto check_res = mCPFPMgr->CheckWriteComplete(ioSlot->GetCPFPPtr());
+                        if (!check_res)
+                        {
+                            return tl::unexpected(StackError("CheckWriteComplete after SkipWriteAsHole, err: ", check_res.error()));
+                        }
+                        ioSlot->Reset();
+                    }
+                    else
+                    {
+                        PrepareOneWrite(ioSlot);
+                    }
                 }
                 else // match , act just like we've done the write
                 {
@@ -987,13 +1078,21 @@ protected:
         }
         else // CksumOnly
         {
-            // write the cksum result to ./cksum_result.log file
             if (bothSlotsReadReaped(slot, slot->GetAssociatedSlot()))
             {
                 auto ioSlot = (slot->GetType() == "rw") ? slot : slot->GetAssociatedSlot();
                 bool match = cksum(slot, slot->GetAssociatedSlot());
-                mCksumResultFile << ioSlot->GetCPFPPtr()->GetSrcPath() << "," << ioSlot->GetCPFPPtr()->GetDstPath()
-                                 << "," << offset << "," << (match ? "MATCHED" : "MISMATCH") << std::endl;
+
+                if (mReporter)
+                {
+                    mReporter->FileCksumResult(
+                        ioSlot->GetCPFPPtr()->GetSrcPath(),
+                        ioSlot->GetCPFPPtr()->GetDstPath(),
+                        match ? "match" : "mismatch",
+                        match ? "block_match" : "block_mismatch",
+                        static_cast<size_t>(offset));
+                }
+
                 if (!match)
                 {
                     mLogger->debug("Checksum mismatch detected at offset: {} for src: {}, dst: {}",
@@ -1092,5 +1191,4 @@ protected:
     std::shared_ptr<FuncDurationStat> mFuncDurationStat;
 
     std::unique_ptr<Digest> mDigest;
-    std::ofstream mCksumResultFile;
 };

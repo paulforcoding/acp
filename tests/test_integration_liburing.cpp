@@ -3,8 +3,19 @@
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
+#include <liburing.h>
 
 namespace fs = std::filesystem;
+
+static bool IsLiburingAvailable()
+{
+    struct io_uring ring;
+    int ret = io_uring_queue_init(1, &ring, 0);
+    if (ret < 0)
+        return false;
+    io_uring_queue_exit(&ring);
+    return true;
+}
 
 static void write_file_exact(const fs::path &p, size_t bytes, char seed)
 {
@@ -57,7 +68,8 @@ static RWCombinedCopyOptions make_liburing_options()
 {
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "info";
-    options.ProgramLogMode = "console";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
     options.CopyEngine = "liburing";
     options.CopyMode = "CopyOnly";
     options.CopyParallelism = 1;
@@ -74,6 +86,9 @@ static RWCombinedCopyOptions make_liburing_options()
 
 TEST_CASE("liburing copy single file", "[integration][liburing]")
 {
+    if (!IsLiburingAvailable())
+        SKIP("io_uring is not available on this system");
+
     fs::path src_dir = fs::path("testdata") / "uring_single_src";
     fs::path dst_dir = fs::path("/tmp") / ("acp_uring_single_dst_" + std::to_string(::getpid()));
     ensure_clean_dir(src_dir);
@@ -95,6 +110,9 @@ TEST_CASE("liburing copy single file", "[integration][liburing]")
 
 TEST_CASE("liburing copy multiple files", "[integration][liburing]")
 {
+    if (!IsLiburingAvailable())
+        SKIP("io_uring is not available on this system");
+
     fs::path src_dir = fs::path("testdata") / "uring_multi_src";
     fs::path dst_dir = fs::path("/tmp") / ("acp_uring_multi_dst_" + std::to_string(::getpid()));
     ensure_clean_dir(src_dir);

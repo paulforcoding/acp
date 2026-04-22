@@ -25,7 +25,9 @@
   - `CksumOnly` — 仅校验不写入，结果记录到 `./cksum_result.log`
 - **实时目录同步** — 可选 `inotify`（Linux）/ `FSEvents`（macOS）监控，实现持续复制
 - **Direct I/O 支持** — 大顺序工作负载绕过页缓存
-- **稀疏文件保持** — 检测并保持文件空洞
+- **稀疏文件保持** — 检测并保持文件空洞（类似 `cp --sparse=auto`）
+- **元数据保留** — 保留时间戳、权限、所有者、扩展属性和 ACL（通过 `PreserveMeta` 可选启用）
+- **双日志系统** — 独立的 `ProgramLog`（程序诊断日志）和 `FileLog`（逐文件复制遥测），各自有独立的 mode 和文件路径配置
 - **可配置并行度** — 多复制线程，每线程独立 I/O 队列深度
 - **跨平台** — Linux 和 macOS
 
@@ -96,24 +98,26 @@ rm -rf build                         # 完全清理
 ```json
 {
   "ProgramLogLevel": "info",
-  "ProgramLogMode": "console",
-  "ProgramLogFilePath": "./acp.log",
-  "FileLogEnabled": false,
+  "ProgramLogMode": "file",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": true,
+  "FileLogMode": "file",
   "FileLogIntervalSec": 5,
-  "FileLogPath": "./.acp_state.json",
+  "FileLogPath": "/tmp/acp_file_info.json",
   "CopyEngine": "libaio",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
-  "CopyParallelism": 4,
+  "CopyParallelism": 1,
   "CopyChanSize": 10,
   "EnableInotify": false,
-  "PreserveSparseFiles": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
   "DirectIO": false,
   "SyncWrites": false,
   "CopyOptions": {
     "IOSize": 1048576,
     "QueueDepth": 8,
-    "Batch": 4,
+    "Batch": 8,
     "IOReapWait": 1
   }
 }
@@ -128,7 +132,7 @@ rm -rf build                         # 完全清理
 | `ProgramLogFilePath` | 程序日志文件路径（mode=file 时生效） | `"./acp.log"` |
 | `FileLogEnabled` | 是否启用结构化文件进度事件 | `false` |
 | `FileLogIntervalSec` | 进度汇总输出间隔（秒） | `5` |
-| `FileLogPath` | 状态文件路径（`""` 表示禁用） | `"./.acp_state.json"` |
+| `FileLogPath` | NDJSON 事件日志路径（file 模式） | `"/tmp/acp_file_info.json"` |
 | `CopyEngine` | `"libaio"`、`"liburing"`（Linux）、`"gcd"`（macOS） | `"libaio"` |
 | `CopyMode` | `"CopyOnly"`、`"CksumCopy"`、`"CksumOnly"` | `"CopyOnly"` |
 | `CksumAlgorithm` | `"xxhash64"`、`"md5"`、`"sha256"` | `"xxhash64"` |
@@ -137,6 +141,8 @@ rm -rf build                         # 完全清理
 | `QueueDepth` | 每线程最大在途 I/O 数 | `8` |
 | `DirectIO` | 使用 `O_DIRECT` 绕过页缓存 | `false` |
 | `SyncWrites` | 每个文件完成后执行 `fsync` | `false` |
+| `PreserveSparseFiles` | 保留稀疏文件空洞 | `true` |
+| `PreserveMeta` | 保留时间戳、权限、所有者、xattr、ACL | `false` |
 | `EnableInotify` | 监控源目录变化（永不退出） | `false` |
 
 ## 用法
@@ -169,7 +175,7 @@ rm -rf build                         # 完全清理
 - **小文件、偶发复制** — 几个 KB 或少量文件时，原生 `cp` 更快，因为 `acp` 有 JSON 配置解析和线程池启动开销。
 - **跨网络复制** — `acp` 是纯本地文件复制工具，不支持 `scp`、`rsync`、`sftp` 或任何网络协议。
 - **特殊文件复制** — 设备文件、socket、FIFO、whiteout 文件会被跳过（日志记录为 unsupported）。如需复制这些文件，请使用 `cp -a` 或 `rsync`。
-- **精确元数据保留** — `acp` 不保留时间戳、权限、ACL 或扩展属性（`xattr`）。它追求吞吐量，而非归档级 fidelity。
+- **归档级元数据保真度** — 虽然 `PreserveMeta` 可保留基本元数据（时间戳、权限、所有者、xattr、ACL），但在某些边缘场景下可能仍不及 `cp -a` 或 `rsync -a`（例如 SELinux 上下文、所有文件系统上的亚秒级精度）。
 - **交互式或脚本化的单文件操作** — 需要 `cp` 的简洁性和立即退出语义的场景。
 
 ## 复制模式说明
@@ -198,9 +204,13 @@ ctest --test-dir build --output-on-failure
 
 # 排除慢速集成测试（大数据集）
 ./build/test_acp "~[integration]"
+
+# 使用 JSON 报告器运行并解析结果
+./build/test_acp --reporter json -s -d yes > test_results.json
+python3 tests/parse_test_results.py test_results.json
 ```
 
-测试覆盖 `Channel`、`CPFilePair`、`CPFilePairMgr`、`IOSlot`、`CksumCopy`、`CksumOnly`、`liburing`、`DirectIO`、`SyncWrites`、`Inotify` 及端到端集成场景。
+测试覆盖 `Channel`、`CPFilePair`、`CPFilePairMgr`、`IOSlot`、`CksumCopy`、`CksumOnly`、`liburing`、`DirectIO`、`SyncWrites`、`PreserveMeta`、`Inotify` 及端到端集成场景。
 
 ## Docker（推荐开发环境）
 

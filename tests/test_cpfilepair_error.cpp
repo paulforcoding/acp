@@ -9,7 +9,7 @@ namespace fs = std::filesystem;
 TEST_CASE("CPFilePair source file does not exist", "[cpfilepair][error]")
 {
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p("/nonexistent/file/path.txt", "/tmp/dst.txt", 4096, false, false, false, logger, nullptr);
+    CPFilePair p("/nonexistent/file/path.txt", "/tmp/dst.txt", 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE_FALSE(init_res.has_value());
 }
@@ -28,7 +28,7 @@ TEST_CASE("CPFilePair source is a fifo", "[cpfilepair][error]")
     REQUIRE(rc == 0);
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src_fifo, dst_dir + "/out", 4096, false, false, false, logger, nullptr);
+    CPFilePair p(src_fifo, dst_dir + "/out", 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     REQUIRE_FALSE(init_res.has_value());
     REQUIRE(init_res.error().Code() == ENOTSUP);
@@ -51,7 +51,7 @@ TEST_CASE("CPFilePair dst directory creation failure", "[cpfilepair][error]")
     }
 
     auto logger = std::make_shared<ConsoleLogger>();
-    CPFilePair p(src, dst, 4096, false, false, false, logger, nullptr);
+    CPFilePair p(src, dst, 4096, false, false, false, false, false, logger, nullptr);
     auto init_res = p.CheckAndInit();
     // Should fail because parent directory cannot be created under /proc
     REQUIRE_FALSE(init_res.has_value());

@@ -33,10 +33,11 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
 
         options.ProgramLogLevel = data.value("ProgramLogLevel", std::string("info"));
         options.ProgramLogMode = data.value("ProgramLogMode", std::string("console"));
-        options.ProgramLogFilePath = data.value("ProgramLogFilePath", std::string("./acp.log"));
+        options.ProgramLogFilePath = data.value("ProgramLogFilePath", std::string("/tmp/acp_program.log"));
         options.FileLogEnabled = data.value("FileLogEnabled", false);
+        options.FileLogMode = data.value("FileLogMode", std::string("file"));
         options.FileLogIntervalSec = data.value("FileLogIntervalSec", 5);
-        options.FileLogPath = data.value("FileLogPath", std::string("./.acp_state.json"));
+        options.FileLogPath = data.value("FileLogPath", std::string("/tmp/acp_file_info.json"));
         options.CopyEngine = data.at("CopyEngine").get<std::string>();
         options.CopyMode = data.at("CopyMode").get<std::string>();
         options.CksumAlgorithm = data.value("CksumAlgorithm", std::string("xxhash64"));
@@ -44,7 +45,8 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
         options.CopyChanSize = data.at("CopyChanSize").get<int>();
         options.DirectIO = data.value("DirectIO", false);
         options.EnableInotify = data.value("EnableInotify", false);
-        options.PreserveSparseFiles = data.value("PreserveSparseFiles", false);
+        options.PreserveSparseFiles = data.value("PreserveSparseFiles", true);
+        options.PreserveMeta = data.value("PreserveMeta", true);
 
         if (options.IoSize == 0)
         {
@@ -157,7 +159,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     // 开始创建各种对象，注入依赖
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogIntervalSec, options.FileLogPath);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     // start a thread to run CopyEngine
@@ -305,7 +307,7 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 #endif
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogIntervalSec, options.FileLogPath);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     // gather file info for copy_plan

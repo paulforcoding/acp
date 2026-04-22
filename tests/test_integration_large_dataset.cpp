@@ -131,12 +131,24 @@ TEST_CASE("integration_large_dataset_copy_verify", "[integration][large]")
 
     RWCombinedCopyOptions options;
     options.ProgramLogLevel = "info";
-    options.ProgramLogMode = "console";
-    options.CopyEngine = "libaio"; // or "liburing"
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
+    options.FileLogEnabled = true;
+    options.FileLogMode = "file";
+    options.FileLogIntervalSec = 5;
+    options.FileLogPath = "/tmp/acp_file_info.json";
+#ifdef __APPLE__
+    options.CopyEngine = "gcd";
+#else
+    options.CopyEngine = "libaio";
+#endif
     options.CopyMode = "CopyOnly";
+    options.CksumAlgorithm = "xxhash64";
     options.CopyParallelism = 2;
+    options.CopyChanSize = 10;
     options.EnableInotify = false;
     options.PreserveSparseFiles = true;
+    options.PreserveMeta = true;
     options.DirectIO = false;
     options.SyncWrites = false;
     options.IoSize = 1 << 20; // 1MB
