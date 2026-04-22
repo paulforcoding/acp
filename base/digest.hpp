@@ -69,7 +69,7 @@ public:
         char buf[SHA256_DIGEST_LENGTH * 2 + 1];
         for (int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
         {
-            sprintf(&buf[i * 2], "%02x", sha256_result[i]);
+            snprintf(&buf[i * 2], 3, "%02x", sha256_result[i]);
         }
         return std::string(buf);
     }
@@ -81,7 +81,7 @@ public:
     {
         unsigned long long hash = XXH64(data, len, 0);
         char buf[17];
-        sprintf(buf, "%016llx", hash);
+        snprintf(buf, sizeof(buf), "%016llx", hash);
         return std::string(buf);
     }
 };
