@@ -1,4 +1,6 @@
 #pragma once
+#include <stack>
+
 #include "base/logger.hpp"
 #include "base/event_reporter.hpp"
 #ifdef __APPLE__
@@ -36,6 +38,10 @@ public:
             cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(mOptions, mLogger, mReporter));
             threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get());
         }
+
+        bool deferDirs = (mOptions.CopyParallelism > 1 && mOptions.PreserveMeta);
+        std::stack<std::unique_ptr<CopyEntry>> deferredDirs;
+
         // 主线程负责从channel中取出CopyEntry，分发到各个CPFilePairMgr中
         size_t round_robin_idx = 0;
         while (true)
@@ -47,6 +53,15 @@ public:
                 break; // exit loop
             }
             auto copy_entry = std::move(pop_res.value());
+
+            if (deferDirs && copy_entry->isDir)
+            {
+                mLogger->debug("CopyEngine.RunChannel(): Deferring directory metadata: src: {}, dst: {}",
+                               copy_entry->srcPath, copy_entry->dstPath);
+                deferredDirs.push(std::move(copy_entry));
+                continue;
+            }
+
             mLogger->debug("CopyEngine.RunChannel(): Adding file pair: src: {}, dst: {}",
                            copy_entry->srcPath, copy_entry->dstPath);
             auto &cpfpMgr = cpfpMgrs[round_robin_idx];
@@ -73,6 +88,51 @@ public:
             }
         }
         mLogger->debug("CopyEngine: All RunQueue threads have finished.");
+
+        // Process deferred directories in LIFO order (deepest first)
+        if (deferDirs)
+        {
+            mLogger->debug("CopyEngine: Processing {} deferred directories.", deferredDirs.size());
+            while (!deferredDirs.empty())
+            {
+                auto entry = std::move(deferredDirs.top());
+                deferredDirs.pop();
+
+                CPFilePair cpfp(entry->srcPath,
+                                entry->dstPath,
+                                false,
+                                false,
+                                false,
+                                mOptions.PreserveMeta,
+                                mLogger,
+                                mReporter);
+                struct stat st;
+                if (lstat(entry->srcPath.c_str(), &st) == 0)
+                {
+                    *cpfp.GetSrcStatPtr() = st;
+                    if (mOptions.PreserveMeta)
+                    {
+                        auto meta_res = cpfp.PreserveMetadata();
+                        if (!meta_res)
+                        {
+                            mLogger->warn("PreserveMetadata failed for deferred dir {}: {}",
+                                          entry->srcPath, meta_res.error().ToString());
+                        }
+                    }
+                }
+                else
+                {
+                    mLogger->warn("lstat failed for deferred dir {}: errno={}", entry->srcPath, errno);
+                }
+
+                if (mReporter)
+                {
+                    mReporter->FileStart(entry->srcPath, entry->dstPath, 0);
+                    mReporter->FileComplete(entry->srcPath, entry->dstPath, 0, 0);
+                    mReporter->IncrementFilesDone();
+                }
+            }
+        }
 
         return {};
     }

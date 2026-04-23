@@ -208,6 +208,13 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         else if (fs::is_directory(status))
         {
             dirsSeen++;
+            std::error_code ec;
+            fs::create_directories(dst_file_path, ec);
+            if (ec)
+            {
+                logger->warn("Failed to eagerly create destination directory: {}, err: {}",
+                             dst_file_path.string(), ec.message());
+            }
         }
         else if (fs::is_regular_file(status))
         {
@@ -223,6 +230,10 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         auto copy_entry = std::make_unique<CopyEntry>();
         copy_entry->srcPath = entry.path().string();
         copy_entry->dstPath = dst_file_path.string();
+        if (fs::is_directory(status))
+        {
+            copy_entry->isDir = true;
+        }
         copyChannel.Push(copy_entry);
 
         // emit scanning progress every 1000 files

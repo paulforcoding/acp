@@ -23,6 +23,7 @@ struct CopyEntry
 {
     std::string srcPath; // full path
     std::string dstPath;
+    bool isDir = false;
 
     // 重载一个等号操作符用于DedupQueue的去重功能
     bool operator==(const CopyEntry &other) const
