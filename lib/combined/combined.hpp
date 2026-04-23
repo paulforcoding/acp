@@ -678,7 +678,8 @@ protected:
 
                 size_t offset = nextIO->GetReadOffset();
                 PrepareOneRead(slot, offset, nextIO);
-                if (mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly")
+                if ((mOptions.CopyMode == "CksumCopy" || mOptions.CopyMode == "CksumOnly") &&
+                    slot->GetType() == "rw")
                 {
                     mCksumQueue.push(slot);
                 }
@@ -1071,6 +1072,10 @@ protected:
                         return tl::unexpected(StackError("HandleWriteCompletion() after cksum match, err: ", write_res.error()));
                     }
                 }
+
+                // reset cksum slot after pair processing
+                auto cksumSlot = (slot->GetType() == "cksum") ? slot : slot->GetAssociatedSlot();
+                cksumSlot->Reset();
             }
         }
         else // CksumOnly
@@ -1111,13 +1116,11 @@ protected:
                 {
                     return tl::unexpected(StackError("HandleWriteCompletion() after CksumOnly, err: ", write_res.error()));
                 }
-            }
-        }
 
-        if (slot->GetType() == "cksum")
-        {
-            // reset cksum slot after processing
-            slot->Reset();
+                // reset cksum slot after pair processing
+                auto cksumSlot = (slot->GetType() == "cksum") ? slot : slot->GetAssociatedSlot();
+                cksumSlot->Reset();
+            }
         }
 
         return {};

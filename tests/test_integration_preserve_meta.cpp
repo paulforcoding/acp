@@ -168,6 +168,17 @@ static int run_copy_only(const fs::path &src_dir, const fs::path &dst_dir, bool 
     return CopyDir(src_dir, dst_dir, options, logger);
 }
 
+static int run_copy_only_parallel(const fs::path &src_dir, const fs::path &dst_dir, int parallelism)
+{
+    auto options = make_test_options();
+    options.CopyMode = "CopyOnly";
+    options.PreserveMeta = true;
+    options.CopyParallelism = parallelism;
+    options.CopyChanSize = std::max(parallelism * 4, 100);
+    auto logger = InitLogger(options);
+    return CopyDir(src_dir, dst_dir, options, logger);
+}
+
 // 创建带特定 mode 的文件
 static void create_file_with_mode(const fs::path &p, mode_t mode)
 {
@@ -540,6 +551,76 @@ TEST_CASE("PM-31: directory tree without PreserveMeta then CksumOnly reports mis
 
     int mismatch_count = count_events_with(output, "cksum_result", "result", "mismatch");
     REQUIRE(mismatch_count >= 2); // at least the 2 regular files
+
+    std::error_code ec;
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
+
+TEST_CASE("PM-40: deferred directory metadata with CopyParallelism > 1 and 1000+ files", "[preserve_meta]")
+{
+    fs::path src_dir = fs::path("testdata") / "pm40_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_pm40_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    // Build a large tree: 10 top dirs x 10 nested dirs x 10 files = 1000 files
+    const int top_count = 10;
+    const int nested_count = 10;
+    const int files_per_dir = 10;
+    int file_seed = 0;
+
+    for (int i = 0; i < top_count; ++i)
+    {
+        fs::path top_dir = src_dir / ("top_" + std::to_string(i));
+        fs::create_directories(top_dir);
+        // Set unique mtime for top-level directory
+        set_file_times(top_dir, 1609459200 + i * 86400, i * 1000000);
+
+        for (int j = 0; j < nested_count; ++j)
+        {
+            fs::path nested_dir = top_dir / ("nested_" + std::to_string(j));
+            fs::create_directories(nested_dir);
+            // Set unique mtime for nested directory
+            set_file_times(nested_dir, 1609459200 + (i * nested_count + j) * 3600, j * 100000);
+
+            for (int k = 0; k < files_per_dir; ++k)
+            {
+                write_file_exact(nested_dir / ("file_" + std::to_string(k) + ".dat"), 4096,
+                                 static_cast<char>('A' + (file_seed % 26)));
+                ++file_seed;
+            }
+        }
+    }
+
+    // Verify source tree has 1000+ files
+    size_t src_file_count = 0;
+    for (const auto &e : fs::recursive_directory_iterator(src_dir))
+    {
+        if (fs::is_regular_file(e.status()))
+            ++src_file_count;
+    }
+    REQUIRE(src_file_count >= 1000);
+
+    // Copy with CopyParallelism = 4 (triggers deferred directory metadata path)
+    REQUIRE(run_copy_only_parallel(src_dir, dst_dir, 4) == 0);
+
+    // Verify file count matches
+    size_t dst_file_count = 0;
+    for (const auto &e : fs::recursive_directory_iterator(dst_dir))
+    {
+        if (fs::is_regular_file(e.status()))
+            ++dst_file_count;
+    }
+    REQUIRE(dst_file_count == src_file_count);
+
+    // CksumOnly to verify all metadata matches (files + directories)
+    std::string output = run_cksum_only(src_dir, dst_dir);
+    int match_count = count_events_with(output, "cksum_result", "result", "match");
+    int mismatch_count = count_events_with(output, "cksum_result", "result", "mismatch");
+    REQUIRE(mismatch_count == 0);
+    // Should match all regular files + directories
+    REQUIRE(match_count >= static_cast<int>(src_file_count));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
