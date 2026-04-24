@@ -1,28 +1,28 @@
 # acp — 异步高性能文件复制工具
 
-**acp** = **a**sync **cp**
+**acp** = **a**sync **cp** = **agent** cp
 
-基于 Linux AIO / io_uring 和 macOS Grand Central Dispatch 的高性能文件复制工具，支持可选的 inotify/FSEvents 目录监控和块级校验和验证。
+核心定位：**Agent-First** 高性能文件复制工具
 
-## 项目定位
+1. 使用 Linux AIO / io_uring 和 macOS Grand Central Dispatch 提高文件复制性能，支持通过 inotify/FSEvents 进行持续的文件复制
+2. 对AI Agent友好：日志和文件复制进度都通过JSONL格式输出，让Agent知晓复制情况；并提供Agent skill来让agent更好地使用本项目
 
-1. **acp = async cp = agent cp** — 核心定位：**Agent-First** 高性能文件复制工具。
-2. **功能上替代原生 `cp`** — 通过异步 I/O 提供更高吞吐，CLI 用法与标准 `cp` 对齐；不利于 Agent 使用或观测的功能不做，不为追求 100% `cp` 兼容而牺牲 Agent 体验。
-3. **与 `cp` 行为对齐** — 命令行用法、路径处理、退出语义在可行范围内与标准 `cp` 命令保持一致。
-4. **仅支持三类文件** — 普通文件、目录、符号链接。设备文件、socket、pipe 等特殊文件不支持复制。
-5. **持续复制服务** — 通过 `inotify`（Linux）/ `FSEvents`（macOS）监控源目录变化，提供持续同步能力。
-6. **AI Agent 友好** — 结构化日志、进度遥测、机器可读状态，使 AI Agent 能够感知和推理文件复制状态。
-7. **企业级文件迁移** — 定位于企业级大规模数据迁移，同时高效支持大量小文件和超大单文件的高性能复制。
+使用场景：
+
+1. 日常使用：acp在功能上，涵盖cp的常用功能（冷僻的功能没有），足以覆盖日常使用场景
+2. 企业级文件迁移：这是acp项目的目标。它具备CopyOnly（全量复制）CksumOnly（校验源端和目的端文件是否一致）CksumCopy（增量复制）三大功能，具备丰富的性能相关参数，支持海量小文件和大文件的数据迁移。
+
+
 
 ## 特性
 
 - **多种异步 I/O 后端**
-  - Linux：`libaio`（默认）或 `io_uring`（`--enable-uring`）
-  - macOS：`GCD`（Grand Central Dispatch）
+  - Linux：`libaio`（默认）或 `io_uring`（`--enable-uring`），内核级异步复制，对比一般复制手段性能提升明显
+  - macOS：`GCD`（Grand Central Dispatch），非内核级异步复制，性能提升幅度不大
 - **复制模式**
-  - `CopyOnly` — 标准高吞吐复制
-  - `CksumCopy` — 块级去重，带 size+mtime 快速预检；仅写入差异块
-  - `CksumOnly` — 仅校验不写入，结果记录到 `./cksum_result.log`
+  - `CopyOnly` — 标准高性能异步复制
+  - `CksumCopy` — 块级cksum校验源端和目的端文件，带 size+mtime 快速预检；仅复制差异文件
+  - `CksumOnly` — 仅校验不写入，用来对比源端和目的端的文件差异情况，对比结果记录到文件报告。
 - **CLI11 命令行参数** — 通过命令行标志覆盖任意配置字段，与 JSON 配置文件分层叠加
 - **分层配置加载** — 配置解析顺序：硬编码默认值 → `/etc/acp_config.json` → `~/.acp_config.json` → `./acp_config.json` → CLI 参数（后者覆盖前者）
 - **I/O 看门狗** — 自动检测并中止卡住的 I/O 操作（`IOStuckTimeout`）
@@ -94,37 +94,71 @@ rm -rf build                         # 完全清理
 
 ## 配置
 
-`acp` 读取 `./acp_config.json`（本地）或 `/etc/acp_config.json`（系统级）。
+`acp` 按以下顺序读取参数：硬编码默认值 → `/etc/acp_config.json` → `~/.acp_config.json` → `./acp_config.json` → CLI 参数（后者覆盖前者）。
+
+### 日常使用场景配置参考
 
 示例 `acp_config.json`：
 
 ```json
 {
-  "ProgramLogLevel": "info",
-  "ProgramLogMode": "file",
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "console",
   "ProgramLogFilePath": "/tmp/acp_program.log",
-  "FileLogEnabled": true,
+  "FileLogEnabled": false,
   "FileLogMode": "file",
   "FileLogIntervalSec": 5,
   "FileLogPath": "/tmp/acp_file_info.json",
-  "CopyEngine": "libaio",
+  "CopyEngine": "liburing",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
   "CopyParallelism": 1,
-  "CopyChanSize": 10,
+  "CopyChanSize": 100,
   "EnableInotify": false,
   "PreserveSparseFiles": true,
   "PreserveMeta": true,
   "DirectIO": false,
-  "SyncWrites": false,
+  "SyncWrites": true,
   "CopyOptions": {
-    "IOSize": 1048576,
+    "IOSize": 131072,
     "QueueDepth": 8,
     "Batch": 8,
     "IOReapWait": 1
   }
 }
 ```
+
+### 数据迁移场景配置参考
+
+```json
+{
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "file",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": true,
+  "FileLogMode": "file",
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "/tmp/acp_file_info.json",
+  "CopyEngine": "liburing",
+  "CopyMode": "CopyOnly",
+  "CksumAlgorithm": "xxhash64",
+  "CopyParallelism": 1,
+  "CopyChanSize": 1000,
+  "EnableInotify": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
+  "DirectIO": false,
+  "SyncWrites": true,
+  "CopyOptions": {
+    "IOSize": 262144,
+    "QueueDepth": 32,
+    "Batch": 8,
+    "IOReapWait": 1
+  }
+}
+```
+
+可以根据机器配置和具体文件系统调整性能参数
 
 ### 配置字段
 
@@ -137,19 +171,19 @@ rm -rf build                         # 完全清理
 | `FileLogMode` | `"console"` 或 `"file"` | `"file"` |
 | `FileLogIntervalSec` | 进度汇总输出间隔（秒） | `5` |
 | `FileLogPath` | NDJSON 事件日志路径（file 模式） | `"/tmp/acp_file_info.json"` |
-| `CopyEngine` | `"libaio"`、`"liburing"`（Linux）、`"gcd"`（macOS） | `"libaio"` |
+| `CopyEngine` | `"libaio"`、`"liburing"`（Linux）、`"gcd"`（macOS） | `"liburing"` |
 | `CopyMode` | `"CopyOnly"`、`"CksumCopy"`、`"CksumOnly"` | `"CopyOnly"` |
 | `CksumAlgorithm` | `"xxhash64"`、`"md5"`、`"sha256"` | `"xxhash64"` |
-| `CopyParallelism` | 并发复制线程数 | `1` |
-| `IOSize` | 每次 I/O 读写大小（字节） | `1048576`（1 MiB） |
-| `QueueDepth` | 每线程最大在途 I/O 数 | `8` |
+| `CopyParallelism` | 并发复制线程数（由于async复制，一般情况此值无需过大） | `1` |
+| `IOSize` | 每次 I/O 读写大小（字节） | `131072`（128 KiB） |
+| `QueueDepth` | 每线程最大在途 I/O 数 | `16` |
 | `Batch` | 每批次提交的 I/O 数 | `8` |
 | `IOReapWait` | I/O 完成等待超时（秒） | `1` |
-| `IOStuckTimeout` | 卡住 I/O 检测超时（秒，`0` = 关闭） | `0` |
+| `IOStuckTimeout` | 卡住 I/O 检测超时（秒，`0` = 关闭） | `10` |
 | `DirectIO` | 使用 `O_DIRECT` 绕过页缓存 | `false` |
-| `SyncWrites` | 每个文件完成后执行 `fsync` | `false` |
+| `SyncWrites` | 每个文件完成后执行 `fsync` | `true` |
 | `PreserveSparseFiles` | 保留稀疏文件空洞 | `true` |
-| `PreserveMeta` | 保留时间戳、权限、所有者、xattr、ACL | `false` |
+| `PreserveMeta` | 保留时间戳、权限、所有者、xattr、ACL | `true` |
 | `EnableInotify` | 监控源目录变化（永不退出） | `false` |
 
 ## 用法
@@ -217,9 +251,7 @@ rm -rf build                         # 完全清理
 ### 不推荐使用 `acp`
 
 - **小文件、偶发复制** — 几个 KB 或少量文件时，原生 `cp` 更快，因为 `acp` 有 JSON 配置解析和线程池启动开销。
-- **跨网络复制** — `acp` 是纯本地文件复制工具，不支持 `scp`、`rsync`、`sftp` 或任何网络协议。
 - **特殊文件复制** — 设备文件、socket、FIFO、whiteout 文件会被跳过（日志记录为 unsupported）。如需复制这些文件，请使用 `cp -a` 或 `rsync`。
-- **归档级元数据保真度** — 虽然 `PreserveMeta` 可保留基本元数据（时间戳、权限、所有者、xattr、ACL），但在某些边缘场景下可能仍不及 `cp -a` 或 `rsync -a`（例如 SELinux 上下文、所有文件系统上的亚秒级精度）。
 - **交互式或脚本化的单文件操作** — 需要 `cp` 的简洁性和立即退出语义的场景。
 
 ## 复制模式说明
@@ -256,24 +288,6 @@ python3 tests/parse_test_results.py test_results.json
 
 测试覆盖 `Channel`、`CPFilePair`、`CPFilePairMgr`、`IOSlot`、`CksumCopy`、`CksumOnly`、`liburing`、`DirectIO`、`SyncWrites`、`PreserveMeta`、`Inotify`、`Watchdog` 及端到端集成场景。
 
-## Docker（推荐开发环境）
-
-提供预配置的 Oracle Linux 9 镜像：
-
-```bash
-# 构建镜像
-docker build -t acp-ol9-dev -f Dockerfile.ol9 .
-
-# 容器内编译
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "cmake -B build -DENABLE_LIBURING=ON && cmake --build build"
-
-# 运行测试
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./build/test_acp "~[integration]"
-
-# 交互式 shell
-docker run -it --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash
-```
-
 ## 架构
 
 ```
@@ -301,9 +315,9 @@ main.cpp
 ## 性能提示
 
 - **io_uring** 在 Linux 5.1+ 上通常优于 `libaio`，因为减少了系统调用开销。
-- **Direct I/O** 对大顺序工作负载有益，但需要扇区对齐的 I/O 大小。
+- **Direct I/O** 对大顺序工作负载有益。
 - 对高 IOPS 存储（NVMe SSD、RAID 阵列）增加 `QueueDepth` 和 `CopyParallelism`。
-- `CksumCopy` 会在目标端增加读放大；仅在写带宽为瓶颈时使用。size+mtime 快速路径可完全跳过未变更文件，消除这些文件的读放大。
+- `CksumCopy` 会在目标端增加读而减少写，对某些读写性能差距较大的介质有很好的提速效果。size+mtime 快速路径可完全跳过未变更文件，消除这些文件的读放大。
 - **看门狗**（`IOStuckTimeout`）可防护不稳定存储或内核驱动 bug 导致的 I/O 挂起。设置为预期最大 I/O 延迟的数倍（如 `30` 秒）。在调试器下运行或 I/O 延迟故意波动的系统上，设为 `0` 关闭。
 
 ### macOS GCD 后端说明
@@ -313,8 +327,7 @@ macOS 后端使用 **Grand Central Dispatch (GCD)**，通过 `dispatch_group_asy
 - macOS 后端是**"伪异步"** — 通过线程实现并发，而非真正的内核异步 I/O。
 - 对大顺序复制场景，吞吐量可能与 Linux 相当，但**延迟和 CPU 开销更高**，因为需要线程管理。
 - 在 macOS 上，`acp` 相对 `cp` 的性能提升**不如 Linux 上 io_uring 的提升那么显著**。
-- 如果在 macOS 上追求最大吞吐量，可考虑使用 `rsync` 或支持 APFS clone 复制的 `cp -c`。
 
 ## 许可证
 
-TBD
+见LICENSE文件

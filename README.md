@@ -1,37 +1,35 @@
-# acp — Asynchronous File Copy Tool
+# acp — Asynchronous High-Performance File Copy Tool
 
-**acp** = **a**sync **cp**
+**acp** = **a**sync **cp** = **agent** cp
 
-High-performance file copy using Linux AIO / io_uring and macOS Grand Central Dispatch, with optional inotify/FSEvents directory monitoring and block-level checksum verification.
+Core positioning: **Agent-First** high-performance file copy tool
 
-## Project Vision
+1. Uses Linux AIO / io_uring and macOS Grand Central Dispatch to improve file copy performance, with optional inotify/FSEvents for continuous file replication
+2. AI Agent friendly: logs and file copy progress are output in JSONL format so agents know the copy status; provides an Agent skill for better agent integration
 
-1. **acp = async cp = agent cp** — an **Agent-First** high-performance file copy tool.
-2. Designed to **functionally replace native `cp`** with superior throughput via async I/O. CLI usage aligns with standard `cp`, but features that hinder agent observability or ergonomics are intentionally omitted — we do not sacrifice the agent experience for 100% `cp` compatibility.
-3. **cp-aligned behavior** — command-line usage, path handling, and exit semantics mirror the standard `cp` command where practical.
-4. **Supported file types** — regular files, directories, and symbolic links only. Special files (device files, sockets, FIFOs/pipes, etc.) are explicitly unsupported.
-5. **Continuous replication** — optional `inotify` (Linux) / `FSEvents` (macOS) monitoring keeps the destination in sync with the source in real time.
-6. **AI-agent friendly** — structured logging, progress telemetry, and machine-readable status make it easy for AI agents to observe and reason about copy operations.
-7. **Enterprise-grade migration** — built for large-scale data migration, efficiently handling both massive quantities of small files and very large individual files.
+Use cases:
+
+1. **Daily use**: acp functionally covers cp's common features (obscure features are omitted) and is sufficient for everyday scenarios
+2. **Enterprise-grade data migration**: this is acp's target. It offers three modes — CopyOnly (full copy), CksumOnly (verify source and destination consistency), and CksumCopy (incremental copy) — with rich performance tuning parameters, supporting massive small files and large single-file data migration.
 
 ## Features
 
 - **Multiple Async I/O Backends**
-  - Linux: `libaio` (default) or `io_uring` (`--enable-uring`)
-  - macOS: `GCD` (Grand Central Dispatch)
+  - Linux: `libaio` (default) or `io_uring` (`--enable-uring`), kernel-level async replication with noticeable performance gains over conventional copy methods
+  - macOS: `GCD` (Grand Central Dispatch), non-kernel-level async replication with modest performance gains
 - **Copy Modes**
-  - `CopyOnly` — standard high-throughput copy
-  - `CksumCopy` — block-level deduplication with fast size+mtime pre-check; only differing blocks are written
-  - `CksumOnly` — verify without writing, results logged to `./cksum_result.log`
-- **CLI11 Argument Parsing** — override any config field via command-line flags, layered on top of JSON config files
-- **Layered Configuration** — config resolution: hardcoded defaults → `/etc/acp_config.json` → `~/.acp_config.json` → `./acp_config.json` → CLI flags (last wins)
+  - `CopyOnly` — standard high-performance async copy
+  - `CksumCopy` — block-level checksum verification between source and destination, with size+mtime fast pre-check; only differing files are copied
+  - `CksumOnly` — verify without writing, used to compare source and destination file differences; results are logged to a file report
+- **CLI11 Command-Line Arguments** — override any config field via command-line flags, layered on top of JSON config files
+- **Layered Configuration Loading** — config resolution: hardcoded defaults → `/etc/acp_config.json` → `~/.acp_config.json` → `./acp_config.json` → CLI flags (last wins)
 - **I/O Watchdog** — automatic detection and abort of stuck I/O operations (`IOStuckTimeout`)
 - **Live Directory Sync** — optional `inotify` (Linux) / `FSEvents` (macOS) monitoring for continuous replication
-- **Direct I/O** support — bypass page cache for large sequential workloads
-- **Sparse File Preservation** — detect and preserve holes (like `cp --sparse=auto`)
-- **Metadata Preservation** — preserve timestamps, mode, ownership, xattr, and ACL (optional via `PreserveMeta`); directory metadata is deferred until after all files complete
-- **Dual Logging System** — independent `ProgramLog` (diagnostics) and `FileLog` (per-file progress telemetry) with separate mode/file-path controls
-- **Configurable Parallelism** — multiple copy threads with per-thread I/O queue depth
+- **Direct I/O Support** — bypass page cache for large sequential workloads
+- **Sparse File Preservation** — detect and preserve file holes (similar to `cp --sparse=auto`)
+- **Metadata Preservation** — preserve timestamps, permissions, ownership, extended attributes, and ACL (optionally via `PreserveMeta`); directory metadata is deferred until after all files complete
+- **Dual Logging System** — independent `ProgramLog` (diagnostics) and `FileLog` (per-file copy telemetry), each with separate mode and file-path configuration
+- **Configurable Parallelism** — multiple copy threads, each with independent I/O queue depth
 - **Cross-Platform** — Linux and macOS
 
 ## System Requirements
@@ -44,7 +42,7 @@ High-performance file copy using Linux AIO / io_uring and macOS Grand Central Di
 - `libfmt-dev`
 - `libssl-dev`
 - `libxxhash-dev`
-- Optional: `liburing-dev` (for io_uring backend)
+- Optional: `liburing-dev` (io_uring backend)
 
 ```bash
 # Oracle Linux 9 / RHEL 9 / Rocky Linux 9
@@ -94,37 +92,71 @@ rm -rf build                         # full clean
 
 ## Configuration
 
-`acp` reads `./acp_config.json` (local) or `/etc/acp_config.json` (system-wide).
+`acp` reads parameters in the following order: hardcoded defaults → `/etc/acp_config.json` → `~/.acp_config.json` → `./acp_config.json` → CLI flags (last wins).
+
+### Everyday Use Configuration Reference
 
 Example `acp_config.json`:
 
 ```json
 {
-  "ProgramLogLevel": "info",
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "console",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": false,
+  "FileLogMode": "file",
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "/tmp/acp_file_info.json",
+  "CopyEngine": "liburing",
+  "CopyMode": "CopyOnly",
+  "CksumAlgorithm": "xxhash64",
+  "CopyParallelism": 1,
+  "CopyChanSize": 100,
+  "EnableInotify": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
+  "DirectIO": false,
+  "SyncWrites": true,
+  "CopyOptions": {
+    "IOSize": 131072,
+    "QueueDepth": 16,
+    "Batch": 8,
+    "IOReapWait": 1
+  }
+}
+```
+
+### Data Migration Configuration Reference
+
+```json
+{
+  "ProgramLogLevel": "error",
   "ProgramLogMode": "file",
   "ProgramLogFilePath": "/tmp/acp_program.log",
   "FileLogEnabled": true,
   "FileLogMode": "file",
   "FileLogIntervalSec": 5,
   "FileLogPath": "/tmp/acp_file_info.json",
-  "CopyEngine": "libaio",
+  "CopyEngine": "liburing",
   "CopyMode": "CopyOnly",
   "CksumAlgorithm": "xxhash64",
   "CopyParallelism": 1,
-  "CopyChanSize": 10,
+  "CopyChanSize": 1000,
   "EnableInotify": false,
   "PreserveSparseFiles": true,
   "PreserveMeta": true,
   "DirectIO": false,
-  "SyncWrites": false,
+  "SyncWrites": true,
   "CopyOptions": {
-    "IOSize": 1048576,
-    "QueueDepth": 8,
+    "IOSize": 262144,
+    "QueueDepth": 32,
     "Batch": 8,
     "IOReapWait": 1
   }
 }
 ```
+
+Performance parameters can be tuned based on machine specs and filesystem.
 
 ### Configuration Fields
 
@@ -135,22 +167,22 @@ Example `acp_config.json`:
 | `ProgramLogFilePath` | Program log file path (mode=file) | `"/tmp/acp_program.log"` |
 | `FileLogEnabled` | Enable structured file progress events | `false` |
 | `FileLogMode` | `"console"` or `"file"` | `"file"` |
-| `FileLogIntervalSec` | Progress summary interval in seconds | `5` |
+| `FileLogIntervalSec` | Progress summary output interval (seconds) | `5` |
 | `FileLogPath` | NDJSON event log path (file mode) | `"/tmp/acp_file_info.json"` |
-| `CopyEngine` | `"libaio"`, `"liburing"` (Linux), `"gcd"` (macOS) | `"libaio"` |
+| `CopyEngine` | `"libaio"`, `"liburing"` (Linux), `"gcd"` (macOS) | `"liburing"` |
 | `CopyMode` | `"CopyOnly"`, `"CksumCopy"`, `"CksumOnly"` | `"CopyOnly"` |
 | `CksumAlgorithm` | `"xxhash64"`, `"md5"`, `"sha256"` | `"xxhash64"` |
-| `CopyParallelism` | Number of concurrent copy threads | `1` |
-| `IOSize` | Per-I/O read/write size in bytes | `1048576` (1 MiB) |
-| `QueueDepth` | Max in-flight I/Os per thread | `8` |
+| `CopyParallelism` | Number of concurrent copy threads (async replication generally does not need large values) | `1` |
+| `IOSize` | Per-I/O read/write size (bytes) | `131072` (128 KiB) |
+| `QueueDepth` | Max in-flight I/Os per thread | `16` |
 | `Batch` | I/Os submitted per batch | `8` |
 | `IOReapWait` | I/O completion wait timeout (seconds) | `1` |
-| `IOStuckTimeout` | Stuck I/O detection timeout (seconds, `0` = off) | `0` |
-| `DirectIO` | Use `O_DIRECT` bypassing page cache | `false` |
-| `SyncWrites` | `fsync` each file after completion | `false` |
+| `IOStuckTimeout` | Stuck I/O detection timeout (seconds, `0` = off) | `10` |
+| `DirectIO` | Use `O_DIRECT` to bypass page cache | `false` |
+| `SyncWrites` | `fsync` after each file completion | `true` |
 | `PreserveSparseFiles` | Preserve sparse file holes | `true` |
-| `PreserveMeta` | Preserve timestamps, mode, ownership, xattr, ACL | `false` |
-| `EnableInotify` | Monitor source for changes (never exits) | `false` |
+| `PreserveMeta` | Preserve timestamps, permissions, ownership, xattr, ACL | `true` |
+| `EnableInotify` | Monitor source directory changes (never exits) | `false` |
 
 ## Usage
 
@@ -217,9 +249,7 @@ Boolean flags support `--enable-*` / `--disable-*` pairs for explicit override.
 ### Do NOT use `acp` when
 
 - **Small, one-off copies** — for a few KB or a handful of files, native `cp` is faster because `acp` has JSON parsing and thread-pool startup overhead.
-- **Cross-network copies** — `acp` is a pure local-file copy tool. It does not speak `scp`, `rsync`, `sftp`, or any network protocol.
 - **Special file replication** — device files, sockets, FIFOs, and whiteout files are skipped (logged as unsupported). Use `cp -a` or `rsync` if you need these.
-- **Archive-level metadata fidelity** — while `PreserveMeta` preserves basic metadata (timestamps, mode, ownership, xattr, ACL), it may not match `cp -a` or `rsync -a` in every edge case (e.g., SELinux contexts, sub-second precision on all filesystems).
 - **Interactive or scripted single-file operations** — where `cp` simplicity and immediate exit semantics are preferred.
 
 ## Copy Modes Explained
@@ -228,10 +258,10 @@ Boolean flags support `--enable-*` / `--disable-*` pairs for explicit override.
 Standard async I/O copy. Best for initial replication.
 
 ### CksumCopy
-First checks file size and modification time; if both match the destination, the entire file is skipped. Otherwise, reads source blocks and compares checksums with the corresponding destination blocks — only differing blocks are written. Useful for incremental sync of large files where most data is unchanged.
+First checks file size and modification time; if both match the destination, the entire file is skipped. Otherwise reads source blocks and compares checksums with the corresponding destination blocks — only differing blocks are written. Useful for incremental sync of large files where most data is unchanged.
 
 ### CksumOnly
-Same comparison as `CksumCopy`, but never writes. Mismatches are logged to `./cksum_result.log` in CSV format:
+Same comparison logic as `CksumCopy`, but never writes. Mismatches are logged to `./cksum_result.log` in CSV format:
 
 ```
 /path/to/src,/path/to/dst,offset,MISMATCH
@@ -255,24 +285,6 @@ python3 tests/parse_test_results.py test_results.json
 ```
 
 Tests cover `Channel`, `CPFilePair`, `CPFilePairMgr`, `IOSlot`, `CksumCopy`, `CksumOnly`, `liburing`, `DirectIO`, `SyncWrites`, `PreserveMeta`, `Inotify`, `Watchdog`, and end-to-end integration scenarios.
-
-## Docker (Recommended for Development)
-
-A pre-configured Oracle Linux 9 image is provided:
-
-```bash
-# Build image
-docker build -t acp-ol9-dev -f Dockerfile.ol9 .
-
-# Compile inside container
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash -c "cmake -B build -DENABLE_LIBURING=ON && cmake --build build"
-
-# Run tests
-docker run --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev ./build/test_acp "~[integration]"
-
-# Interactive shell
-docker run -it --rm -v "$(pwd):/acp" -w /acp acp-ol9-dev bash
-```
 
 ## Architecture
 
@@ -313,8 +325,7 @@ The macOS backend uses **Grand Central Dispatch (GCD)** with `dispatch_group_asy
 - The macOS backend is **"pseudo-async"** — it achieves concurrency through threads, not true async I/O.
 - For large sequential copies, throughput may be comparable to Linux, but **latency and CPU overhead are higher** due to thread management.
 - On macOS, `acp` will not outperform `cp` as dramatically as `io_uring` does on Linux.
-- If maximum throughput on macOS is critical, consider using `rsync` or `cp` with APFS clone copies (`cp -c`) instead.
 
 ## License
 
-TBD
+See LICENSE file
