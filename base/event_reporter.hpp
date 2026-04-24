@@ -130,6 +130,31 @@ public:
             total, done, bytesTotal, bytesDone, durationMs, speedMbps, CurrentIsoTimestamp()));
     }
 
+    void StuckDetected(long round, int stuckSeconds)
+    {
+        if (!mEnabled)
+            return;
+        size_t total = mFilesTotal.load();
+        size_t done = mFilesDone.load();
+        size_t bytesTotal = mBytesTotal.load();
+        size_t bytesDone = mBytesDone.load();
+        std::string currentFile;
+        {
+            std::lock_guard<std::mutex> lock(mCurrentFileMutex);
+            currentFile = mCurrentFile;
+        }
+        EmitEvent(fmt::format(
+            "{{\"type\":\"file_info\",\"event\":\"stuck_detected\","
+            "\"round\":{},\"stuck_seconds\":{},"
+            "\"files_total\":{},\"files_done\":{},"
+            "\"bytes_total\":{},\"bytes_done\":{},"
+            "\"current_file\":\"{}\",\"timestamp\":\"{}\"}}",
+            round, stuckSeconds,
+            total, done, bytesTotal, bytesDone,
+            EscapeJsonString(currentFile),
+            CurrentIsoTimestamp()));
+    }
+
     void MaybeEmitProgressSummary()
     {
         if (!mEnabled)
@@ -180,6 +205,16 @@ public:
 
     void SetFilesTotal(size_t n) { mFilesTotal.store(n, std::memory_order_relaxed); }
     void SetBytesTotal(size_t n) { mBytesTotal.store(n, std::memory_order_relaxed); }
+
+    size_t GetFilesTotal() const { return mFilesTotal.load(std::memory_order_relaxed); }
+    size_t GetFilesDone() const { return mFilesDone.load(std::memory_order_relaxed); }
+    size_t GetBytesTotal() const { return mBytesTotal.load(std::memory_order_relaxed); }
+    size_t GetBytesDone() const { return mBytesDone.load(std::memory_order_relaxed); }
+    std::string GetCurrentFile() const
+    {
+        std::lock_guard<std::mutex> lock(mCurrentFileMutex);
+        return mCurrentFile;
+    }
 
     // --- 状态文件 ---
 
@@ -314,7 +349,7 @@ private:
     std::atomic<size_t> mBytesTotal{0};
     std::atomic<size_t> mBytesDone{0};
 
-    std::mutex mCurrentFileMutex;
+    mutable std::mutex mCurrentFileMutex;
     std::string mCurrentFile;
 
     std::mutex mEmitMutex;

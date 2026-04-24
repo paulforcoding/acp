@@ -1,5 +1,5 @@
 #pragma once
-#include <stack>
+#include <vector>
 
 #include "base/logger.hpp"
 #include "base/event_reporter.hpp"
@@ -40,7 +40,8 @@ public:
         }
 
         bool deferDirs = (mOptions.CopyParallelism > 1 && mOptions.PreserveMeta);
-        std::stack<std::unique_ptr<CopyEntry>> deferredDirs;
+        std::vector<std::unique_ptr<CopyEntry>> deferredDirs;
+        deferredDirs.reserve(100);
 
         // 主线程负责从channel中取出CopyEntry，分发到各个CPFilePairMgr中
         size_t round_robin_idx = 0;
@@ -54,11 +55,11 @@ public:
             }
             auto copy_entry = std::move(pop_res.value());
 
-            if (deferDirs && copy_entry->isDir)
+            if (deferDirs && S_ISDIR(copy_entry->srcStat.st_mode))
             {
                 mLogger->debug("CopyEngine.RunChannel(): Deferring directory metadata: src: {}, dst: {}",
                                copy_entry->srcPath, copy_entry->dstPath);
-                deferredDirs.push(std::move(copy_entry));
+                deferredDirs.push_back(std::move(copy_entry));
                 continue;
             }
 
@@ -93,11 +94,8 @@ public:
         if (deferDirs)
         {
             mLogger->debug("CopyEngine: Processing {} deferred directories.", deferredDirs.size());
-            while (!deferredDirs.empty())
+            for (auto &entry : deferredDirs)
             {
-                auto entry = std::move(deferredDirs.top());
-                deferredDirs.pop();
-
                 CPFilePair cpfp(entry->srcPath,
                                 entry->dstPath,
                                 false,
@@ -106,23 +104,15 @@ public:
                                 mOptions.PreserveMeta,
                                 mLogger,
                                 mReporter);
-                struct stat st;
-                if (lstat(entry->srcPath.c_str(), &st) == 0)
+                *cpfp.GetSrcStatPtr() = entry->srcStat;
+                if (mOptions.PreserveMeta)
                 {
-                    *cpfp.GetSrcStatPtr() = st;
-                    if (mOptions.PreserveMeta)
+                    auto meta_res = cpfp.PreserveMetadata();
+                    if (!meta_res)
                     {
-                        auto meta_res = cpfp.PreserveMetadata();
-                        if (!meta_res)
-                        {
-                            mLogger->warn("PreserveMetadata failed for deferred dir {}: {}",
-                                          entry->srcPath, meta_res.error().ToString());
-                        }
+                        mLogger->warn("PreserveMetadata failed for deferred dir {}: {}",
+                                      entry->srcPath, meta_res.error().ToString());
                     }
-                }
-                else
-                {
-                    mLogger->warn("lstat failed for deferred dir {}: errno={}", entry->srcPath, errno);
                 }
 
                 if (mReporter)

@@ -1,6 +1,8 @@
 #include "lib/mainlib.hpp"
 
+#include <dirent.h>
 #include <fstream>
+#include <sys/stat.h>
 
 #include "base/event_reporter.hpp"
 
@@ -30,6 +32,7 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
         options.QueueDepth = copyOpts.at("QueueDepth").get<size_t>();
         options.Batch = copyOpts.at("Batch").get<int>();
         options.IOReapWait = copyOpts.at("IOReapWait").get<int>();
+        options.IOStuckTimeout = copyOpts.value("IOStuckTimeout", 0);
 
         options.ProgramLogLevel = data.value("ProgramLogLevel", std::string("info"));
         options.ProgramLogMode = data.value("ProgramLogMode", std::string("console"));
@@ -66,6 +69,11 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
         if (options.CopyChanSize <= 0)
         {
             std::cerr << "Configuration error: CopyChanSize must be greater than 0" << std::endl;
+            return std::nullopt;
+        }
+        if (options.IOStuckTimeout < 0)
+        {
+            std::cerr << "Configuration error: IOStuckTimeout must be >= 0" << std::endl;
             return std::nullopt;
         }
 
@@ -187,6 +195,15 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     }
 
     // recursively walk through source directory and prepare file pairs
+    // using post-order DFS with explicit stack (readdir + lstat, each path stat once)
+    struct ScanFrame
+    {
+        std::string srcPath;
+        std::string dstPath;
+        DIR *dir = nullptr;
+        bool childrenProcessed = false;
+    };
+
     size_t filesSeen = 0;
     size_t dirsSeen = 0;
     size_t symlinksSeen = 0;
@@ -195,51 +212,102 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     size_t filesUnsupported = 0;
     auto scanStart = std::chrono::steady_clock::now();
 
-    for (const auto &entry : fs::recursive_directory_iterator(src_p))
+    DIR *rootDir = opendir(src_p.c_str());
+    if (!rootDir)
     {
-        fs::path relative_path = fs::relative(entry.path(), src_p);
-        fs::path dst_file_path = dst_p / relative_path;
+        std::cerr << "opendir failed for source directory: " << src_p.string()
+                  << ", errno=" << errno << std::endl;
+        return 1;
+    }
 
-        auto status = entry.symlink_status();
-        if (fs::is_symlink(status))
+    // Use deque instead of vector because push_back to deque does not invalidate
+    // references to existing elements, avoiding use-after-free when frame is a
+    // reference to scanStack.back() and we push a child directory.
+    std::deque<ScanFrame> scanStack;
+    scanStack.push_back({src_p.string(), dst_p.string(), rootDir, false});
+
+    while (!scanStack.empty())
+    {
+        auto &frame = scanStack.back();
+
+        if (!frame.childrenProcessed)
         {
-            symlinksSeen++;
-        }
-        else if (fs::is_directory(status))
-        {
-            dirsSeen++;
-            std::error_code ec;
-            fs::create_directories(dst_file_path, ec);
-            if (ec)
+            frame.childrenProcessed = true;
+
+            struct dirent *entry;
+            while ((entry = readdir(frame.dir)) != nullptr)
             {
-                logger->warn("Failed to eagerly create destination directory: {}, err: {}",
-                             dst_file_path.string(), ec.message());
+                if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+                    continue;
+
+                std::string srcChild = frame.srcPath + "/" + std::string(entry->d_name);
+                std::string dstChild = frame.dstPath + "/" + std::string(entry->d_name);
+
+                struct stat st;
+                if (lstat(srcChild.c_str(), &st) != 0)
+                {
+                    logger->warn("lstat failed for {}: errno={}", srcChild, errno);
+                    filesSeen++;
+                    continue;
+                }
+
+                if (S_ISLNK(st.st_mode))
+                {
+                    auto ce = std::make_unique<CopyEntry>();
+                    ce->srcPath = srcChild;
+                    ce->dstPath = dstChild;
+                    ce->srcStat = st;
+                    copyChannel.Push(ce);
+                    symlinksSeen++;
+                    filesSeen++;
+                }
+                else if (S_ISDIR(st.st_mode))
+                {
+                    mkdir(dstChild.c_str(), st.st_mode & 0777);
+
+                    DIR *childDir = opendir(srcChild.c_str());
+                    if (!childDir)
+                    {
+                        logger->warn("opendir failed for {}: errno={}", srcChild, errno);
+                        filesSeen++;
+                        continue;
+                    }
+                    scanStack.push_back({srcChild, dstChild, childDir, false});
+                }
+                else if (S_ISREG(st.st_mode))
+                {
+                    auto ce = std::make_unique<CopyEntry>();
+                    ce->srcPath = srcChild;
+                    ce->dstPath = dstChild;
+                    ce->srcStat = st;
+                    copyChannel.Push(ce);
+                    filesSeen++;
+                    bytesSeen += st.st_size;
+                    filesRegular++;
+                }
+                else
+                {
+                    filesUnsupported++;
+                    filesSeen++;
+                }
             }
-        }
-        else if (fs::is_regular_file(status))
-        {
-            filesRegular++;
-            bytesSeen += fs::file_size(entry.path());
+
+            if (reporter && filesSeen % 1000 == 0)
+            {
+                reporter->CopyPlan("scanning", filesSeen, dirsSeen, symlinksSeen, bytesSeen, filesRegular, filesUnsupported);
+            }
         }
         else
         {
-            filesUnsupported++;
-        }
-        filesSeen++;
+            auto ce = std::make_unique<CopyEntry>();
+            ce->srcPath = frame.srcPath;
+            ce->dstPath = frame.dstPath;
+            lstat(ce->srcPath.c_str(), &ce->srcStat);
+            copyChannel.Push(ce);
+            dirsSeen++;
 
-        auto copy_entry = std::make_unique<CopyEntry>();
-        copy_entry->srcPath = entry.path().string();
-        copy_entry->dstPath = dst_file_path.string();
-        if (fs::is_directory(status))
-        {
-            copy_entry->isDir = true;
-        }
-        copyChannel.Push(copy_entry);
-
-        // emit scanning progress every 1000 files
-        if (reporter && filesSeen % 1000 == 0)
-        {
-            reporter->CopyPlan("scanning", filesSeen, dirsSeen, symlinksSeen, bytesSeen, filesRegular, filesUnsupported);
+            closedir(frame.dir);
+            scanStack.pop_back();
         }
     }
 
@@ -284,6 +352,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             auto copy_entry = std::make_unique<CopyEntry>();
             copy_entry->srcPath = changed_path;
             copy_entry->dstPath = changed_dst_path.string();
+            lstat(copy_entry->srcPath.c_str(), &copy_entry->srcStat);
             copyChannel.Push(copy_entry);
         }
         // main() never exits normally when inotify is enabled
@@ -350,6 +419,7 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     auto copy_entry = std::make_unique<CopyEntry>();
     copy_entry->srcPath = src_file.string();
     copy_entry->dstPath = dst_file.string();
+    lstat(copy_entry->srcPath.c_str(), &copy_entry->srcStat);
     copyChannel.Push(copy_entry);
 
     copyChannel.Close();

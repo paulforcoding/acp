@@ -5,6 +5,7 @@
 #ifdef __linux__
 #include <libaio.h>
 #endif
+#include <sys/stat.h>
 #include <tl/expected.hpp>
 #include <vector>
 #include <map>
@@ -23,7 +24,7 @@ struct CopyEntry
 {
     std::string srcPath; // full path
     std::string dstPath;
-    bool isDir = false;
+    struct stat srcStat{};
 
     // 重载一个等号操作符用于DedupQueue的去重功能
     bool operator==(const CopyEntry &other) const
@@ -57,6 +58,7 @@ struct RWCombinedCopyOptions
     size_t QueueDepth = 8;
     int Batch = 4;
     int IOReapWait = 1; // seconds
+    int IOStuckTimeout = 0; // seconds, 0 = disabled (default)
 };
 
 // 这个类提供源文件和目标文件的信息，并且IO计数的功能，并且负责打开和关闭文件描述符、复制attr extended-attributes等
@@ -491,12 +493,6 @@ public:
 
 //             mLogger->debug("Submitted {} read IOs in round: {}.", submit_res.value(), round);
 
-//             // auto check_stuck_res = CheckStuck();
-//             // if (!check_stuck_res)
-//             // {
-//             //     return tl::unexpected(check_stuck_res.error());
-//             // }
-
 //             auto reap_res = IOReap();
 //             if (!reap_res)
 //             {
@@ -527,6 +523,16 @@ public:
         }
 
         long round = 0;
+
+        // === Watchdog state ===
+        size_t lastFilesDone = 0;
+        size_t lastBytesDone = 0;
+        int stuckRounds = 0;
+        const bool watchdogEnabled = (mOptions.IOStuckTimeout > 0 && !mOptions.EnableInotify);
+        const int stuckThreshold = watchdogEnabled
+            ? std::max(1, mOptions.IOStuckTimeout / std::max(1, mOptions.IOReapWait))
+            : 0;
+
         while (true)
         {
             mLogger->debug("Starting IO round: {}", round);
@@ -591,6 +597,58 @@ public:
                 mReporter->UpdateStateFile();
             }
 
+            // === Watchdog detection ===
+            if (watchdogEnabled && mReporter)
+            {
+                size_t filesDone = mReporter->GetFilesDone();
+                size_t bytesDone = mReporter->GetBytesDone();
+
+                if (filesDone == lastFilesDone && bytesDone == lastBytesDone)
+                {
+                    bool hasSubmitted = false;
+                    for (auto &slot_up : mRWSlots)
+                    {
+                        auto st = slot_up->GetStatus();
+                        if (st == IOSlot::Status::ReadSubmitted ||
+                            st == IOSlot::Status::WriteSubmitted)
+                        {
+                            hasSubmitted = true;
+                            break;
+                        }
+                    }
+                    if (hasSubmitted)
+                    {
+                        stuckRounds++;
+                        if (stuckRounds >= stuckThreshold)
+                        {
+                            int stuckSeconds = stuckRounds * mOptions.IOReapWait;
+                            mReporter->StuckDetected(round, stuckSeconds);
+                            mLogger->error("Watchdog: IO stuck for {}s ({} rounds), "
+                                           "files_done={}, bytes_done={}",
+                                           stuckSeconds, stuckRounds,
+                                           filesDone, bytesDone);
+                            return tl::unexpected(
+                                StackError(fmt::format(
+                                    "IO stuck: no progress for {}s "
+                                    "(threshold={}s, IOReapWait={}s)",
+                                    stuckSeconds,
+                                    mOptions.IOStuckTimeout,
+                                    mOptions.IOReapWait)));
+                        }
+                    }
+                    else
+                    {
+                        stuckRounds = 0;
+                    }
+                }
+                else
+                {
+                    stuckRounds = 0;
+                    lastFilesDone = filesDone;
+                    lastBytesDone = bytesDone;
+                }
+            }
+
             round++;
         }
 
@@ -605,29 +663,6 @@ public:
     }
 
 protected:
-    tl::expected<void, StackError> CheckStuck()
-    {
-        // 检查是否只少有一个slot处于ReadSubmitted或者WriteSubmitted状态
-        bool isStuck = true;
-        for (auto &slot_up : mRWSlots)
-        {
-            auto slot = slot_up.get();
-            if (slot->GetStatus() == IOSlot::Status::ReadSubmitted || slot->GetStatus() == IOSlot::Status::WriteSubmitted)
-            {
-                isStuck = false;
-                break;
-            }
-        }
-
-        if (isStuck && !mCPFPMgr->IsStopRequested() && !mOptions.EnableInotify)
-        {
-            mLogger->warn("Detected stuck AIO operations.");
-            return tl::unexpected(StackError("Detected stuck AIO operations."));
-        }
-
-        return {};
-    }
-
     SlotType *GetOneFreeCksumSlot()
     {
         for (auto &slot_up : mCksumSlots)
