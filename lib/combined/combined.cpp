@@ -247,6 +247,41 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
     }
 
+    // Fast-path for CksumCopy: if dst exists with same size and mtime,
+    // skip block-level checksum entirely (rsync-style optimization).
+    if (mCksum && !mCksumOnly && mDstFd >= 0)
+    {
+        struct stat dstStat;
+        if (fstat(mDstFd, &dstStat) == 0)
+        {
+            if (mSrcStat.st_size == dstStat.st_size)
+            {
+#ifdef __APPLE__
+                auto srcMtime = mSrcStat.st_mtimespec;
+                auto dstMtime = dstStat.st_mtimespec;
+#else
+                auto srcMtime = mSrcStat.st_mtim;
+                auto dstMtime = dstStat.st_mtim;
+#endif
+                if (srcMtime.tv_sec == dstMtime.tv_sec && srcMtime.tv_nsec == dstMtime.tv_nsec)
+                {
+                    close(mSrcFd); mSrcFd = -1;
+                    close(mDstFd); mDstFd = -1;
+                    mSkipBlockCksum = true;
+                    mReadBytes = static_cast<size_t>(mSrcStat.st_size);
+                    mWrittenBytes = static_cast<size_t>(mSrcStat.st_size);
+                    mStartTime = std::chrono::steady_clock::now();
+                    if (mReporter)
+                    {
+                        mReporter->FileStart(mSrcPath, mDstPath, GetSrcFileSize());
+                    }
+                    EmitCksumResult("match", "size_mtime_match");
+                    return {};
+                }
+            }
+        }
+    }
+
     if (mReporter)
     {
         mReporter->FileStart(mSrcPath, mDstPath, GetSrcFileSize());
