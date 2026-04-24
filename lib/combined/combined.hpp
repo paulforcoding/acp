@@ -527,11 +527,8 @@ public:
         // === Watchdog state ===
         size_t lastFilesDone = 0;
         size_t lastBytesDone = 0;
-        int stuckRounds = 0;
+        auto lastProgressTime = std::chrono::steady_clock::now();
         const bool watchdogEnabled = (mOptions.IOStuckTimeout > 0 && !mOptions.EnableInotify);
-        const int stuckThreshold = watchdogEnabled
-            ? std::max(1, mOptions.IOStuckTimeout / std::max(1, mOptions.IOReapWait))
-            : 0;
 
         while (true)
         {
@@ -603,50 +600,44 @@ public:
                 size_t filesDone = mReporter->GetFilesDone();
                 size_t bytesDone = mReporter->GetBytesDone();
 
-                if (filesDone == lastFilesDone && bytesDone == lastBytesDone)
+                bool hasSubmitted = false;
+                for (auto &slot_up : mRWSlots)
                 {
-                    bool hasSubmitted = false;
-                    for (auto &slot_up : mRWSlots)
+                    auto st = slot_up->GetStatus();
+                    if (st == IOSlot::Status::ReadSubmitted ||
+                        st == IOSlot::Status::WriteSubmitted)
                     {
-                        auto st = slot_up->GetStatus();
-                        if (st == IOSlot::Status::ReadSubmitted ||
-                            st == IOSlot::Status::WriteSubmitted)
-                        {
-                            hasSubmitted = true;
-                            break;
-                        }
-                    }
-                    if (hasSubmitted)
-                    {
-                        stuckRounds++;
-                        if (stuckRounds >= stuckThreshold)
-                        {
-                            int stuckSeconds = stuckRounds * mOptions.IOReapWait;
-                            mReporter->StuckDetected(round, stuckSeconds);
-                            mLogger->error("Watchdog: IO stuck for {}s ({} rounds), "
-                                           "files_done={}, bytes_done={}",
-                                           stuckSeconds, stuckRounds,
-                                           filesDone, bytesDone);
-                            return tl::unexpected(
-                                StackError(fmt::format(
-                                    "IO stuck: no progress for {}s "
-                                    "(threshold={}s, IOReapWait={}s)",
-                                    stuckSeconds,
-                                    mOptions.IOStuckTimeout,
-                                    mOptions.IOReapWait)));
-                        }
-                    }
-                    else
-                    {
-                        stuckRounds = 0;
+                        hasSubmitted = true;
+                        break;
                     }
                 }
-                else
+
+                if (filesDone != lastFilesDone || bytesDone != lastBytesDone || !hasSubmitted)
                 {
-                    stuckRounds = 0;
-                    lastFilesDone = filesDone;
-                    lastBytesDone = bytesDone;
+                    lastProgressTime = std::chrono::steady_clock::now();
                 }
+                else if (hasSubmitted)
+                {
+                    auto elapsedSec = std::chrono::duration_cast<std::chrono::seconds>(
+                                          std::chrono::steady_clock::now() - lastProgressTime)
+                                          .count();
+                    if (elapsedSec >= mOptions.IOStuckTimeout)
+                    {
+                        mReporter->StuckDetected(round, static_cast<int>(elapsedSec));
+                        mLogger->error("Watchdog: IO stuck for {}s, "
+                                       "files_done={}, bytes_done={}",
+                                       elapsedSec,
+                                       filesDone, bytesDone);
+                        return tl::unexpected(
+                            StackError(fmt::format(
+                                "IO stuck: no progress for {}s "
+                                "(threshold={}s)",
+                                elapsedSec,
+                                mOptions.IOStuckTimeout)));
+                    }
+                }
+                lastFilesDone = filesDone;
+                lastBytesDone = bytesDone;
             }
 
             round++;
@@ -1195,6 +1186,10 @@ protected:
 
         // update written bytes and check completion
         slot->GetCPFPPtr()->UpdateWrittenBytes(io_ret);
+        if (mReporter)
+        {
+            mReporter->AddBytesDone(static_cast<size_t>(io_ret));
+        }
 
         auto check_res = CheckOneCompleted(slot);
         if (!check_res)

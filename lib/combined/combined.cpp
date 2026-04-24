@@ -423,7 +423,6 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
         {
             mReporter->FileComplete(pFP->GetSrcPath(), pFP->GetDstPath(), pFP->GetSrcFileSize(), pFP->GetElapsedMs());
             mReporter->IncrementFilesDone();
-            mReporter->AddBytesDone(pFP->GetSrcFileSize());
         }
     }
     return {};
@@ -1007,6 +1006,10 @@ tl::expected<void, StackError> CPFilePair::SkipWriteAsHole(size_t bytes)
 {
     mHasHoles = true;
     UpdateWrittenBytes(bytes);
+    if (mReporter)
+    {
+        mReporter->AddBytesDone(bytes);
+    }
 
     if (IsWriteFinished())
     {

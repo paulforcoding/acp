@@ -15,6 +15,7 @@
   "PreserveMeta": true,
   "DirectIO": false,
   "SyncWrites": false,
+  "IOStuckTimeout": 10,
   "CopyOptions": {
     "QueueDepth": 16,
     "IOSize": 131072,

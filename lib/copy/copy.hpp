@@ -32,11 +32,12 @@ public:
         threads.reserve(mOptions.CopyParallelism);
         std::vector<std::unique_ptr<CPFilePairMgr>> cpfpMgrs;
         cpfpMgrs.reserve(mOptions.CopyParallelism);
+        std::vector<std::optional<StackError>> threadErrors(mOptions.CopyParallelism);
 
         for (int i = 0; i < mOptions.CopyParallelism; ++i)
         {
             cpfpMgrs.emplace_back(std::make_unique<CPFilePairMgr>(mOptions, mLogger, mReporter));
-            threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get());
+            threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get(), std::ref(threadErrors[i]));
         }
 
         bool deferDirs = (mOptions.CopyParallelism > 1 && mOptions.PreserveMeta);
@@ -90,6 +91,14 @@ public:
         }
         mLogger->debug("CopyEngine: All RunQueue threads have finished.");
 
+        for (auto &err : threadErrors)
+        {
+            if (err)
+            {
+                return tl::unexpected(*err);
+            }
+        }
+
         // Process deferred directories in LIFO order (deepest first)
         if (deferDirs)
         {
@@ -128,7 +137,7 @@ public:
     }
 
 private:
-    void startCopyThread(CPFilePairMgr *cpfpMgr)
+    void startCopyThread(CPFilePairMgr *cpfpMgr, std::optional<StackError> &outError)
     {
         std::unique_ptr<IOSlotMgr<IOSlot>> slotMgr;
 #ifdef __APPLE__
@@ -154,6 +163,7 @@ private:
         if (!run_res)
         {
             mLogger->error("CopyEngine::RunChannel: RunQueue() failed, err: {}", run_res.error().ToString());
+            outError = run_res.error();
         }
     };
 

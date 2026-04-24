@@ -48,7 +48,6 @@ static bool files_equal(const fs::path &a, const fs::path &b)
 static RWCombinedCopyOptions make_copyfile_options()
 {
     RWCombinedCopyOptions options;
-    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "info";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";
