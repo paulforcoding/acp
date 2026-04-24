@@ -1111,16 +1111,6 @@ protected:
                 auto ioSlot = (slot->GetType() == "rw") ? slot : slot->GetAssociatedSlot();
                 bool match = cksum(slot, slot->GetAssociatedSlot());
 
-                if (mReporter)
-                {
-                    mReporter->FileCksumResult(
-                        ioSlot->GetCPFPPtr()->GetSrcPath(),
-                        ioSlot->GetCPFPPtr()->GetDstPath(),
-                        match ? "match" : "mismatch",
-                        match ? "block_match" : "block_mismatch",
-                        static_cast<size_t>(offset));
-                }
-
                 if (!match)
                 {
                     mLogger->debug("Checksum mismatch detected at offset: {} for src: {}, dst: {}",
