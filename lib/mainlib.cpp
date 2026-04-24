@@ -128,7 +128,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 #ifdef __APPLE__
     if (options.DirectIO)
     {
-        std::cerr << "DirectIO is not supported on macOS" << std::endl;
+        logger->error("DirectIO is not supported on macOS");
         return 1;
     }
 #endif
@@ -146,7 +146,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         auto add_watch_res = inotifyWatcher.Init();
         if (!add_watch_res)
         {
-            std::cerr << fmt::format("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().ToString());
+            logger->error("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().ToString());
             return 1;
         }
         // start a thread to read inotify events and push to copyChannel
@@ -192,8 +192,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         fs::create_directories(dst_p, ec);
         if (ec)
         {
-            std::cerr << "Failed to create destination directory: " << dst_p.string()
-                      << ", errstr: " << ec.message() << std::endl;
+            logger->error("Failed to create destination directory: {}, errstr: {}", dst_p.string(), ec.message());
             return 1;
         }
     }
@@ -219,8 +218,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     DIR *rootDir = opendir(src_p.c_str());
     if (!rootDir)
     {
-        std::cerr << "opendir failed for source directory: " << src_p.string()
-                  << ", errno=" << errno << std::endl;
+        logger->error("opendir failed for source directory: {}, errno={}", src_p.string(), errno);
         return 1;
     }
 
@@ -391,7 +389,7 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 #ifdef __APPLE__
     if (options.DirectIO)
     {
-        std::cerr << "DirectIO is not supported on macOS" << std::endl;
+        logger->error("DirectIO is not supported on macOS");
         return 1;
     }
 #endif
