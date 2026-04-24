@@ -386,7 +386,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                 return tl::unexpected(StackError("pFP->TruncateDstToSrcSize(), err: ", truncate_res.error()));
             }
         }
-        if (mOptions.SyncWrites && pFP->GetDstFileSize() > 0 && !pFP->IsSkipBlockCksum())
+        if (mOptions.SyncWrites && pFP->GetSrcFileSize() > 0 && !pFP->IsSkipBlockCksum())
         {
             auto fsync_res = pFP->FsyncDst();
             if (!fsync_res)
