@@ -227,7 +227,7 @@ TEST_CASE("PM-01: PreserveMeta=true then CksumOnly reports match", "[preserve_me
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "block_match"));
+    REQUIRE(has_event_with(output, "cksum_result", "reason", "meta_match"));
     // atime may differ because reading src updates it; only check critical metadata
     REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
     REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));

@@ -731,7 +731,7 @@ tl::expected<void, StackError> CPFilePair::CompareMetadata()
     CompareXattr(dstStat);
     CompareAcl(dstStat);
 
-    if (!mMetaMismatchEmitted && mSkipBlockCksum)
+    if (!mMetaMismatchEmitted)
     {
         EmitCksumResult("match", "meta_match");
     }

@@ -236,7 +236,7 @@ TEST_CASE("CksumOnly emits FileLog cksum_result match events", "[integration][ck
 
     // Verify cksum_result events exist
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "block_match"));
+    REQUIRE(has_event_with(output, "cksum_result", "reason", "meta_match"));
 
     // Verify no cksum_result.log is created
     std::error_code ec;
