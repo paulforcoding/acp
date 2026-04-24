@@ -118,6 +118,7 @@ static int count_events_with(const std::string &output,
 static RWCombinedCopyOptions make_test_options()
 {
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "error";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";

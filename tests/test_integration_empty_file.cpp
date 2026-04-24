@@ -39,6 +39,7 @@ static void ensure_clean_dir(const fs::path &p)
 static RWCombinedCopyOptions make_empty_options()
 {
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "info";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";

@@ -74,6 +74,7 @@ TEST_CASE("SP-01: sparse file with hole in middle is preserved", "[sparse]")
         REQUIRE(is_sparse(src_file));
 
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "error";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";
@@ -144,6 +145,7 @@ TEST_CASE("SP-02: non-sparse file copy is not affected by heuristic", "[sparse]"
     REQUIRE_FALSE(is_sparse(src_file));
 
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "error";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";

@@ -1,10 +1,11 @@
 #include <iostream>
-#include <string>
+#include <vector>
 #include <filesystem>
 #include <algorithm>
 #include "lib/mainlib.hpp"
+#include "lib/thirdparty/CLI11.hpp"
 
-constexpr const char* kVersion = "0.4.0";
+constexpr const char* kVersion = "0.5.0";
 
 #ifdef __APPLE__
 constexpr const char* kPlatform = "macOS";
@@ -63,142 +64,28 @@ static void PrintHelp(const char *program_name)
         "acp — async cp, high-performance file copy for Linux/macOS\n"
         "\n"
         "USAGE\n"
-        "    " << program_name << " <src_path> <dst_path>\n"
+        "    " << program_name << " [OPTIONS] <src_path>... <dst_path>\n"
         "\n"
         "POSITIONAL ARGUMENTS\n"
-        "    src_path    Source path (regular file or directory)\n"
+        "    src_path    One or more source paths (regular files or directories)\n"
         "    dst_path    Destination path (regular file or directory)\n"
         "\n"
-        "CONFIG\n"
-        "    Loaded from ./acp_config.json or /etc/acp_config.json (first found wins).\n"
+        "    Single source:\n"
+        "        src may be a file or directory.\n"
+        "        dst may be a non-existing path (created), an existing file\n"
+        "        (overwritten), or an existing directory (copied inside).\n"
         "\n"
-        "CONFIGURATION FIELDS\n"
-        "─────────────────────────────────────────────────────────────────────────\n"
-        "LOGGING\n"
-        "    Note: ProgramLog* controls general application diagnostics (normal/abnormal\n"
-        "    program behavior); FileLog* controls per-file copy progress telemetry\n"
-        "    (what files are being copied and their status).\n"
+        "    Multiple sources:\n"
+        "        All sources are copied into dst, which must be an existing directory.\n"
         "\n"
-        "    ProgramLogLevel       string   default: \"info\"\n"
-        "                          Values: \"trace\", \"debug\", \"info\", \"warn\", \"error\", \"critical\"\n"
+        "CONFIG LOADING ORDER (later overrides earlier)\n"
+        "    1. Built-in defaults\n"
+        "    2. /etc/acp_config.json\n"
+        "    3. ~/acp_config.json\n"
+        "    4. ./acp_config.json\n"
+        "    5. Command-line options\n"
         "\n"
-        "    ProgramLogMode        string   default: \"console\"\n"
-        "                          Values: \"console\", \"file\"\n"
-        "\n"
-        "    ProgramLogFilePath    string   default: \"/tmp/acp_program.log\"\n"
-        "                          Effective when ProgramLogMode == \"file\".\n"
-        "\n"
-        "    FileLogEnabled        bool     default: false\n"
-        "                          If true, enable file_info event output.\n"
-        "\n"
-        "    FileLogMode           string   default: \"file\"\n"
-        "                          Values: \"console\", \"file\"\n"
-        "                          console — output NDJSON events to stdout.\n"
-        "                          file    — append NDJSON events to FileLogPath.\n"
-        "\n"
-        "    FileLogIntervalSec    int      default: 5\n"
-        "                          Progress summary flush interval in seconds.\n"
-        "\n"
-        "    FileLogPath           string   default: \"/tmp/acp_file_info.json\"\n"
-        "                          NDJSON event log path (file mode).\n"
-        "                          Also used for state snapshot when FileLogMode==\"console\".\n"
-        "\n"
-        "COPY ENGINE\n"
-        "    CopyEngine            string   required\n"
-        "                          Values: \"libaio\", \"liburing\" (Linux); \"libaio\" on macOS\n"
-        "                          \"liburing\" requires ENABLE_LIBURING=ON at build time.\n"
-        "                          macOS always uses GCD; CopyEngine value is ignored but must be present.\n"
-        "\n"
-        "    CopyMode              string   required\n"
-        "                          Values: \"CopyOnly\", \"CksumCopy\", \"CksumOnly\"\n"
-        "                          CopyOnly   — standard read/write copy.\n"
-        "                          CksumCopy  — verify checksum before writing; skip matched blocks.\n"
-        "                          CksumOnly  — verify checksum only; write nothing; log mismatches\n"
-        "                                       to ./cksum_result.log.\n"
-        "\n"
-        "    CksumAlgorithm        string   default: \"xxhash64\"\n"
-        "                          Values: \"xxhash64\", \"md5\", \"sha256\"\n"
-        "\n"
-        "    CopyParallelism       int      required, min: 1\n"
-        "                          Number of concurrent copy worker threads.\n"
-        "\n"
-        "    CopyChanSize          int      required, min: 1\n"
-        "                          Bounded channel capacity for file pair dispatch.\n"
-        "\n"
-        "    EnableInotify         bool     default: false\n"
-        "                          If true, monitor source directory for changes after initial copy.\n"
-        "                          On Linux: inotify; on macOS: FSEvents.\n"
-        "                          The process runs indefinitely until interrupted.\n"
-        "\n"
-        "IO OPTIONS (nested under \"CopyOptions\")\n"
-        "    IOSize                size_t   required, default: 1048576\n"
-        "                          Single I/O unit size in bytes.\n"
-        "\n"
-        "    QueueDepth            size_t   required, min: 1\n"
-        "                          Max in-flight asynchronous I/O requests per worker.\n"
-        "\n"
-        "    Batch                 int      required\n"
-        "                          Number of I/Os to submit in one batch.\n"
-        "\n"
-        "    IOReapWait            int      required, unit: seconds\n"
-        "                          Max wait time for I/O completion events.\n"
-        "\n"
-        "    IOStuckTimeout        int      default: 0 (disabled)\n"
-        "                          Max seconds without progress before declaring stuck.\n"
-        "                          Only effective when EnableInotify=false.\n"
-        "                          If >0, RunQueue exits with error when IO hangs.\n"
-        "\n"
-        "ADVANCED\n"
-        "    DirectIO              bool     default: false\n"
-        "                          Use O_DIRECT for unbuffered I/O.\n"
-        "\n"
-        "    SyncWrites            bool     default: false\n"
-        "                          Sync data to disk after each write (fsync per write).\n"
-        "\n"
-        "    PreserveSparseFiles   bool     default: true\n"
-        "                          Preserve sparse file holes (detected heuristically, like cp --sparse=auto).\n"
-        "\n"
-        "CONFIG EXAMPLE\n"
-        "─────────────────────────────────────────────────────────────────────────\n"
-        "{\n"
-        "  \"ProgramLogLevel\": \"info\",\n"
-        "  \"ProgramLogMode\": \"console\",\n"
-        "  \"ProgramLogFilePath\": \"/tmp/acp_program.log\",\n"
-        "  \"FileLogEnabled\": false,\n"
-        "  \"FileLogMode\": \"file\",\n"
-        "  \"FileLogIntervalSec\": 5,\n"
-        "  \"FileLogPath\": \"/tmp/acp_file_info.json\",\n"
-        "  \"CopyEngine\": \"libaio\",\n"
-        "  \"CopyMode\": \"CopyOnly\",\n"
-        "  \"CksumAlgorithm\": \"xxhash64\",\n"
-        "  \"CopyParallelism\": 1,\n"
-        "  \"CopyChanSize\": 10,\n"
-        "  \"EnableInotify\": false,\n"
-        "  \"PreserveSparseFiles\": true,\n"
-        "  \"DirectIO\": false,\n"
-        "  \"SyncWrites\": false,\n"
-        "  \"CopyOptions\": {\n"
-        "    \"QueueDepth\": 8,\n"
-        "    \"IOSize\": 1048576,\n"
-        "    \"Batch\": 8,\n"
-        "    \"IOReapWait\": 1,\n"
-        "    \"IOStuckTimeout\": 0\n"
-        "  }\n"
-        "}\n"
-        "\n"
-        "UNSUPPORTED FILE TYPES\n"
-        "─────────────────────────────────────────────────────────────────────────\n"
-        "    acp only copies regular files, directories, and symbolic links.\n"
-        "    The following file types are logged as 'skipped' and the copy continues:\n"
-        "\n"
-        "        • Block devices\n"
-        "        • Character devices\n"
-        "        • FIFOs (named pipes)\n"
-        "        • Sockets\n"
-        "        • Whiteout files\n"
-        "\n"
-        "    When FileLogEnabled is true, skipped files appear in the NDJSON status\n"
-        "    stream with event_type 'file_error' or 'file_unsupported'.\n"
+        "    Use --help-all to see all available command-line options.\n"
         "\n"
         "EXIT CODES\n"
         "    0   Success\n"
@@ -221,120 +108,323 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    auto options_opt = LoadCopyOptions("./acp_config.json");
-    if (!options_opt)
-    {
-        options_opt = LoadCopyOptions("/etc/acp_config.json");
-        if (!options_opt)
-        {
-            std::cerr << "Failed to load configuration from ./acp_config.json or /etc/acp_config.json" << std::endl;
-            return 1;
-        }
+    // ---------- CLI11 definition ----------
+    CLI::App app{"acp — async cp, high-performance file copy"};
+
+    std::optional<std::string> optLogLevel, optLogMode, optLogFile;
+    std::optional<std::string> optFileLogMode, optFileLogPath;
+    std::optional<std::string> optEngine, optMode, optCksumAlgo;
+    std::optional<int> optFileLogInterval, optParallelism, optChanSize;
+    std::optional<size_t> optIoSize, optQueueDepth;
+    std::optional<int> optBatch, optIoReapWait, optIoStuckTimeout;
+
+    bool enableFileLog = false, disableFileLog = false;
+    bool enableInotify = false, disableInotify = false;
+    bool enableSparse = false, disableSparse = false;
+    bool enablePreserveMeta = false, disablePreserveMeta = false;
+    bool enableDirectIO = false, disableDirectIO = false;
+    bool enableSync = false, disableSync = false;
+
+    // String options
+    app.add_option("--log-level,-L", optLogLevel, "Program log level (trace/debug/info/warn/error/critical)");
+    app.add_option("--log-mode", optLogMode, "Program log mode (console/file)");
+    app.add_option("--log-file", optLogFile, "Program log file path");
+    app.add_option("--file-log-mode", optFileLogMode, "File log mode (console/file)");
+    app.add_option("--file-log-path", optFileLogPath, "File log output path");
+    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)");
+    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)");
+    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)");
+
+    // Numeric options
+    app.add_option("--file-log-interval", optFileLogInterval, "File log flush interval (sec)")->check(CLI::PositiveNumber);
+    app.add_option("--parallelism,-p", optParallelism, "Number of copy worker threads")->check(CLI::PositiveNumber);
+    app.add_option("--chan-size", optChanSize, "Channel capacity for file dispatch")->check(CLI::PositiveNumber);
+    app.add_option("--io-size", optIoSize, "I/O unit size in bytes")->check(CLI::PositiveNumber);
+    app.add_option("--queue-depth,-q", optQueueDepth, "Max in-flight I/Os per worker")->check(CLI::PositiveNumber);
+    app.add_option("--batch,-b", optBatch, "I/Os submitted per batch")->check(CLI::PositiveNumber);
+    app.add_option("--io-reap-wait,-w", optIoReapWait, "I/O completion wait timeout (sec)")->check(CLI::PositiveNumber);
+    app.add_option("--io-stuck-timeout,-t", optIoStuckTimeout, "Stuck I/O detection timeout (sec, 0=off)")->check(CLI::NonNegativeNumber);
+
+    // Boolean flag pairs
+    app.add_flag("--enable-file-log", enableFileLog, "Enable file-level NDJSON logging");
+    app.add_flag("--disable-file-log", disableFileLog, "Disable file-level NDJSON logging");
+    app.add_flag("--enable-inotify", enableInotify, "Enable source directory monitoring");
+    app.add_flag("--disable-inotify", disableInotify, "Disable source directory monitoring");
+    app.add_flag("--enable-sparse", enableSparse, "Preserve sparse file holes");
+    app.add_flag("--disable-sparse", disableSparse, "Do not preserve sparse file holes");
+    app.add_flag("--enable-preserve-meta", enablePreserveMeta, "Preserve file metadata");
+    app.add_flag("--disable-preserve-meta", disablePreserveMeta, "Do not preserve file metadata");
+    app.add_flag("--enable-direct-io", enableDirectIO, "Use O_DIRECT for unbuffered I/O");
+    app.add_flag("--disable-direct-io", disableDirectIO, "Use buffered I/O");
+    app.add_flag("--enable-sync", enableSync, "Sync data to disk after each write");
+    app.add_flag("--disable-sync", disableSync, "Do not force sync after writes");
+
+    // Positional arguments
+    std::vector<std::string> positional;
+    app.add_option("paths", positional, "Source and destination paths")
+       ->required()
+       ->expected(-1);
+
+    app.set_version_flag("--version,-v", kVersion);
+
+    // ---------- Load defaults (embedded in RWCombinedCopyOptions constructor) ----------
+    RWCombinedCopyOptions options;
+
+    // ---------- Layered config file loading ----------
+    auto merge = [&](const std::string& path) {
+        auto merged = MergeCopyOptions(options, path);
+        if (merged) options = *merged;
+    };
+
+    merge("/etc/acp_config.json");
+
+    const char* home = std::getenv("HOME");
+    if (home) {
+        merge(std::string(home) + "/acp_config.json");
     }
-    auto options = options_opt.value();
+
+    merge("./acp_config.json");
+
+    // ---------- Parse command line ----------
+    try {
+        app.parse(argc, argv);
+    } catch (const CLI::ParseError& e) {
+        return app.exit(e);
+    }
+
+    // ---------- Apply command-line overrides ----------
+    if (optLogLevel)        options.ProgramLogLevel = *optLogLevel;
+    if (optLogMode)         options.ProgramLogMode = *optLogMode;
+    if (optLogFile)         options.ProgramLogFilePath = *optLogFile;
+    if (optFileLogMode)     options.FileLogMode = *optFileLogMode;
+    if (optFileLogPath)     options.FileLogPath = *optFileLogPath;
+    if (optEngine)          options.CopyEngine = *optEngine;
+    if (optMode)            options.CopyMode = *optMode;
+    if (optCksumAlgo)       options.CksumAlgorithm = *optCksumAlgo;
+
+    if (optFileLogInterval) options.FileLogIntervalSec = *optFileLogInterval;
+    if (optParallelism)     options.CopyParallelism = *optParallelism;
+    if (optChanSize)        options.CopyChanSize = *optChanSize;
+    if (optIoSize)          options.IoSize = *optIoSize;
+    if (optQueueDepth)      options.QueueDepth = *optQueueDepth;
+    if (optBatch)           options.Batch = *optBatch;
+    if (optIoReapWait)      options.IOReapWait = *optIoReapWait;
+    if (optIoStuckTimeout)  options.IOStuckTimeout = *optIoStuckTimeout;
+
+    if (enableFileLog)      options.FileLogEnabled = true;
+    if (disableFileLog)     options.FileLogEnabled = false;
+    if (enableInotify)      options.EnableInotify = true;
+    if (disableInotify)     options.EnableInotify = false;
+    if (enableSparse)       options.PreserveSparseFiles = true;
+    if (disableSparse)      options.PreserveSparseFiles = false;
+    if (enablePreserveMeta) options.PreserveMeta = true;
+    if (disablePreserveMeta)options.PreserveMeta = false;
+    if (enableDirectIO)     options.DirectIO = true;
+    if (disableDirectIO)    options.DirectIO = false;
+    if (enableSync)         options.SyncWrites = true;
+    if (disableSync)        options.SyncWrites = false;
+
+    // ---------- Unified validation ----------
+    if (options.IoSize == 0) {
+        std::cerr << "Configuration error: IOSize must be > 0\n";
+        return 1;
+    }
+    if (options.QueueDepth == 0) {
+        std::cerr << "Configuration error: QueueDepth must be > 0\n";
+        return 1;
+    }
+    if (options.CopyParallelism <= 0) {
+        std::cerr << "Configuration error: CopyParallelism must be > 0\n";
+        return 1;
+    }
+    if (options.CopyChanSize <= 0) {
+        std::cerr << "Configuration error: CopyChanSize must be > 0\n";
+        return 1;
+    }
+    if (options.IOStuckTimeout < 0) {
+        std::cerr << "Configuration error: IOStuckTimeout must be >= 0\n";
+        return 1;
+    }
+
+    // IOStuckTimeout and EnableInotify are mutually exclusive
+    if (options.EnableInotify && options.IOStuckTimeout > 0) {
+        std::cerr << "Configuration error: IOStuckTimeout and EnableInotify are mutually exclusive.\n";
+        return 1;
+    }
+
+#ifdef __APPLE__
+    // macOS: validate explicit CopyEngine setting
+    if (optEngine && *optEngine != "gcd") {
+        std::cerr << "Configuration error: On macOS, --engine must be 'gcd'. Got: " << *optEngine << "\n";
+        return 1;
+    }
+    if (options.DirectIO) {
+        std::cerr << "DirectIO is not supported on macOS" << std::endl;
+        return 1;
+    }
+#endif
 
     auto logger = InitLogger(options);
 
-    if (argc != 3)
-    {
-        std::cerr << "Usage: " << argv[0] << " <src_path> <dst_path>" << std::endl;
-        std::cerr << "\t All IO option should be written in ./acp_config.json or /etc/acp_config.json" << std::endl;
-        return 1;
-    }
+    std::string dstPath = positional.back();
+    std::vector<std::string> srcPaths(positional.begin(), positional.end() - 1);
+    bool multiSource = srcPaths.size() > 1;
 
-    const char *src_path = argv[1];
-    const char *dst_path = argv[2];
-
-    // check source path and destination path, if source path or destination path not exist, exit directly
-    if (!fs::exists(src_path))
+    // Check all sources exist
+    for (const auto& src : srcPaths)
     {
-        std::cerr << "Source path does not exist: " << src_path << std::endl;
-        return 1;
-    }
-    if (!fs::exists(dst_path) && !fs::is_regular_file(src_path))
-    {
-        std::cerr << "Destination path does not exist: " << dst_path << std::endl;
-        return 1;
-    }
-
-    // if (fs::is_directory(src_path) && fs::is_regular_file(dst_path))
-    // {
-    //     std::cerr << "When source path is a directory, destination path cannot be a file." << std::endl;
-    //     return 1;
-    // }
-
-    // check source path and destination path are not the same
-    if (fs::equivalent(src_path, dst_path))
-    {
-        std::cerr << "Source path and destination path cannot be the same." << std::endl;
-        return 1;
-    }
-    // check destination path is writable
-    std::error_code ec;
-    fs::perms p = fs::status(dst_path, ec).permissions();
-    if (ec)
-    {
-        std::cerr << "Failed to get permissions of destination path: " << dst_path << ", errstr: " << ec.message() << std::endl;
-        return 1;
-    }
-    if ((p & fs::perms::owner_write) == fs::perms::none &&
-        (p & fs::perms::group_write) == fs::perms::none &&
-        (p & fs::perms::others_write) == fs::perms::none)
-    {
-        std::cerr << "Destination path is not writable: " << dst_path << std::endl;
-        return 1;
-    }
-
-    // convert src and dst path to canonical path
-    fs::path src_p = fs::canonical(src_path);
-    fs::path dst_p = fs::canonical(dst_path);
-    // check src and dst are not subdirectory of each other when both are directories
-    if (fs::is_directory(src_path) && fs::is_directory(dst_path))
-    {
-        // use the 4-iterator overload of std::mismatch to compare path components safely
-        // src_is_prefix_of_dst == true means dst is inside src (or equal)
-        bool src_is_prefix_of_dst = std::mismatch(src_p.begin(), src_p.end(), dst_p.begin(), dst_p.end()).first == src_p.end();
-        bool dst_is_prefix_of_src = std::mismatch(dst_p.begin(), dst_p.end(), src_p.begin(), src_p.end()).first == dst_p.end();
-
-        if (src_is_prefix_of_dst || dst_is_prefix_of_src)
+        if (!fs::exists(src))
         {
-            std::cerr << "Source path and destination path cannot be subdirectory of each other." << std::endl;
-            std::cerr << "Source path: " << src_p.string() << std::endl;
-            std::cerr << "Destination path: " << dst_p.string() << std::endl;
+            std::cerr << "Source path does not exist: " << src << std::endl;
             return 1;
         }
     }
 
-    // recursively walk through source directory and prepare file pairs
-    if (fs::is_directory(src_path) && fs::is_directory(dst_path))
+    // Multi-source mode: destination must be an existing directory
+    if (multiSource && !fs::is_directory(dstPath))
     {
-        // 要找出src_path的最后一级目录，以便在dst_path下创建同名目录
-        fs::path src_last_level = fs::path(src_p).filename();
-        dst_p = dst_p / src_last_level;
-
-        logger->warn("begin to copy directory: {} to directory: {}", src_p.string(), dst_p.string());
-
-        return CopyDir(src_p, dst_p, options, logger);
-    }
-    else if (fs::is_regular_file(src_path) && fs::is_directory(dst_path)) // copy single file into directory
-    {
-        fs::path src_last_level = fs::path(src_p).filename();
-        dst_p = dst_p / src_last_level;
-        logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
-
-        return CopyFile(src_p, dst_p, options, logger);
-    }
-    else if (fs::is_regular_file(src_path) && fs::is_regular_file(dst_path)) // single file copy
-    {
-        logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
-
-        return CopyFile(src_p, dst_p, options, logger);
-    }
-    else
-    {
-        std::cerr << "Unsupported source and destination path types." << std::endl;
+        std::cerr << "When copying multiple sources, destination must be an existing directory." << std::endl;
         return 1;
     }
 
-    return 0;
+    // Disable inotify for multi-source mode
+    if (multiSource && options.EnableInotify)
+    {
+        logger->warn("Inotify is disabled when copying multiple sources.");
+        options.EnableInotify = false;
+    }
+
+    bool anyFailed = false;
+
+    for (const auto& src_path : srcPaths)
+    {
+        fs::path src_p;
+        try
+        {
+            src_p = fs::canonical(src_path);
+        }
+        catch (const fs::filesystem_error& e)
+        {
+            std::cerr << "Failed to resolve source path: " << src_path << ", " << e.what() << std::endl;
+            anyFailed = true;
+            continue;
+        }
+
+        fs::path dst_p;
+        if (multiSource)
+        {
+            try
+            {
+                dst_p = fs::canonical(dstPath) / src_p.filename();
+            }
+            catch (const fs::filesystem_error& e)
+            {
+                std::cerr << "Failed to resolve destination path: " << dstPath << ", " << e.what() << std::endl;
+                anyFailed = true;
+                continue;
+            }
+        }
+        else
+        {
+            if (fs::exists(dstPath))
+            {
+                try
+                {
+                    dst_p = fs::canonical(dstPath);
+                }
+                catch (const fs::filesystem_error& e)
+                {
+                    std::cerr << "Failed to resolve destination path: " << dstPath << ", " << e.what() << std::endl;
+                    anyFailed = true;
+                    continue;
+                }
+            }
+            else
+            {
+                dst_p = fs::absolute(dstPath);
+            }
+        }
+
+        // Check source and destination are not the same
+        if (fs::exists(dst_p))
+        {
+            try
+            {
+                if (fs::equivalent(src_p, dst_p))
+                {
+                    std::cerr << "Source path and destination path cannot be the same." << std::endl;
+                    anyFailed = true;
+                    continue;
+                }
+            }
+            catch (const fs::filesystem_error&)
+            {
+                // equivalent may fail for some path combinations; ignore
+            }
+        }
+
+        // Check destination is writable (only if it exists)
+        if (fs::exists(dst_p))
+        {
+            std::error_code ec;
+            fs::perms p = fs::status(dst_p, ec).permissions();
+            if (!ec &&
+                (p & fs::perms::owner_write) == fs::perms::none &&
+                (p & fs::perms::group_write) == fs::perms::none &&
+                (p & fs::perms::others_write) == fs::perms::none)
+            {
+                std::cerr << "Destination path is not writable: " << dst_p.string() << std::endl;
+                anyFailed = true;
+                continue;
+            }
+        }
+
+        // Check src and dst are not subdirectory of each other when source is a directory
+        if (fs::is_directory(src_p) && fs::is_directory(dst_p))
+        {
+            bool src_is_prefix_of_dst = std::mismatch(src_p.begin(), src_p.end(), dst_p.begin(), dst_p.end()).first == src_p.end();
+            bool dst_is_prefix_of_src = std::mismatch(dst_p.begin(), dst_p.end(), src_p.begin(), src_p.end()).first == dst_p.end();
+
+            if (src_is_prefix_of_dst || dst_is_prefix_of_src)
+            {
+                std::cerr << "Source path and destination path cannot be subdirectory of each other." << std::endl;
+                std::cerr << "Source path: " << src_p.string() << std::endl;
+                std::cerr << "Destination path: " << dst_p.string() << std::endl;
+                anyFailed = true;
+                continue;
+            }
+        }
+
+        // Dispatch copy
+        if (fs::is_directory(src_p) && fs::is_directory(dst_p))
+        {
+            fs::path final_dst = dst_p / src_p.filename();
+            logger->warn("begin to copy directory: {} to directory: {}", src_p.string(), final_dst.string());
+            int rc = CopyDir(src_p, final_dst, options, logger);
+            if (rc != 0)
+                anyFailed = true;
+        }
+        else if (fs::is_regular_file(src_p) && fs::is_directory(dst_p))
+        {
+            fs::path final_dst = dst_p / src_p.filename();
+            logger->info("begin to copy file: {} to file: {}", src_p.string(), final_dst.string());
+            int rc = CopyFile(src_p, final_dst, options, logger);
+            if (rc != 0)
+                anyFailed = true;
+        }
+        else if (fs::is_regular_file(src_p))
+        {
+            logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
+            int rc = CopyFile(src_p, dst_p, options, logger);
+            if (rc != 0)
+                anyFailed = true;
+        }
+        else
+        {
+            std::cerr << "Unsupported source type: " << src_p.string() << std::endl;
+            anyFailed = true;
+        }
+    }
+
+    return anyFailed ? 1 : 0;
 }

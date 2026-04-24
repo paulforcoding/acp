@@ -130,6 +130,7 @@ TEST_CASE("integration_large_dataset_copy_verify", "[integration][large]")
     generate_dataset(src_root);
 
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "info";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";

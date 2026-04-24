@@ -12,7 +12,9 @@
 #include "base/inotify.hpp"
 #endif
 
-std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_path)
+std::optional<RWCombinedCopyOptions> MergeCopyOptions(
+    const RWCombinedCopyOptions &base,
+    const std::string &config_path)
 {
     std::ifstream f(config_path);
     if (!f.is_open())
@@ -24,57 +26,56 @@ std::optional<RWCombinedCopyOptions> LoadCopyOptions(const std::string &config_p
     try
     {
         json data = json::parse(f);
+        RWCombinedCopyOptions options = base;
 
-        RWCombinedCopyOptions options;
+        if (data.contains("ProgramLogLevel"))
+            options.ProgramLogLevel = data["ProgramLogLevel"].get<std::string>();
+        if (data.contains("ProgramLogMode"))
+            options.ProgramLogMode = data["ProgramLogMode"].get<std::string>();
+        if (data.contains("ProgramLogFilePath"))
+            options.ProgramLogFilePath = data["ProgramLogFilePath"].get<std::string>();
+        if (data.contains("FileLogEnabled"))
+            options.FileLogEnabled = data["FileLogEnabled"].get<bool>();
+        if (data.contains("FileLogMode"))
+            options.FileLogMode = data["FileLogMode"].get<std::string>();
+        if (data.contains("FileLogIntervalSec"))
+            options.FileLogIntervalSec = data["FileLogIntervalSec"].get<int>();
+        if (data.contains("FileLogPath"))
+            options.FileLogPath = data["FileLogPath"].get<std::string>();
+        if (data.contains("CopyEngine"))
+            options.CopyEngine = data["CopyEngine"].get<std::string>();
+        if (data.contains("CopyMode"))
+            options.CopyMode = data["CopyMode"].get<std::string>();
+        if (data.contains("CksumAlgorithm"))
+            options.CksumAlgorithm = data["CksumAlgorithm"].get<std::string>();
+        if (data.contains("CopyParallelism"))
+            options.CopyParallelism = data["CopyParallelism"].get<int>();
+        if (data.contains("CopyChanSize"))
+            options.CopyChanSize = data["CopyChanSize"].get<int>();
+        if (data.contains("DirectIO"))
+            options.DirectIO = data["DirectIO"].get<bool>();
+        if (data.contains("EnableInotify"))
+            options.EnableInotify = data["EnableInotify"].get<bool>();
+        if (data.contains("PreserveSparseFiles"))
+            options.PreserveSparseFiles = data["PreserveSparseFiles"].get<bool>();
+        if (data.contains("PreserveMeta"))
+            options.PreserveMeta = data["PreserveMeta"].get<bool>();
+        if (data.contains("SyncWrites"))
+            options.SyncWrites = data["SyncWrites"].get<bool>();
 
-        auto copyOpts = data.at("CopyOptions");
-        options.IoSize = copyOpts.at("IOSize").get<size_t>();
-        options.QueueDepth = copyOpts.at("QueueDepth").get<size_t>();
-        options.Batch = copyOpts.at("Batch").get<int>();
-        options.IOReapWait = copyOpts.at("IOReapWait").get<int>();
-        options.IOStuckTimeout = copyOpts.value("IOStuckTimeout", 0);
-
-        options.ProgramLogLevel = data.value("ProgramLogLevel", std::string("info"));
-        options.ProgramLogMode = data.value("ProgramLogMode", std::string("console"));
-        options.ProgramLogFilePath = data.value("ProgramLogFilePath", std::string("/tmp/acp_program.log"));
-        options.FileLogEnabled = data.value("FileLogEnabled", false);
-        options.FileLogMode = data.value("FileLogMode", std::string("file"));
-        options.FileLogIntervalSec = data.value("FileLogIntervalSec", 5);
-        options.FileLogPath = data.value("FileLogPath", std::string("/tmp/acp_file_info.json"));
-        options.CopyEngine = data.at("CopyEngine").get<std::string>();
-        options.CopyMode = data.at("CopyMode").get<std::string>();
-        options.CksumAlgorithm = data.value("CksumAlgorithm", std::string("xxhash64"));
-        options.CopyParallelism = data.at("CopyParallelism").get<int>();
-        options.CopyChanSize = data.at("CopyChanSize").get<int>();
-        options.DirectIO = data.value("DirectIO", false);
-        options.EnableInotify = data.value("EnableInotify", false);
-        options.PreserveSparseFiles = data.value("PreserveSparseFiles", true);
-        options.PreserveMeta = data.value("PreserveMeta", true);
-
-        if (options.IoSize == 0)
+        if (data.contains("CopyOptions"))
         {
-            std::cerr << "Configuration error: IOSize must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.QueueDepth == 0)
-        {
-            std::cerr << "Configuration error: QueueDepth must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.CopyParallelism <= 0)
-        {
-            std::cerr << "Configuration error: CopyParallelism must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.CopyChanSize <= 0)
-        {
-            std::cerr << "Configuration error: CopyChanSize must be greater than 0" << std::endl;
-            return std::nullopt;
-        }
-        if (options.IOStuckTimeout < 0)
-        {
-            std::cerr << "Configuration error: IOStuckTimeout must be >= 0" << std::endl;
-            return std::nullopt;
+            auto &co = data["CopyOptions"];
+            if (co.contains("IOSize"))
+                options.IoSize = co["IOSize"].get<size_t>();
+            if (co.contains("QueueDepth"))
+                options.QueueDepth = co["QueueDepth"].get<size_t>();
+            if (co.contains("Batch"))
+                options.Batch = co["Batch"].get<int>();
+            if (co.contains("IOReapWait"))
+                options.IOReapWait = co["IOReapWait"].get<int>();
+            if (co.contains("IOStuckTimeout"))
+                options.IOStuckTimeout = co["IOStuckTimeout"].get<int>();
         }
 
         return options;
@@ -170,14 +171,17 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
+    std::atomic<bool> copyFailed{false};
+
     // start a thread to run CopyEngine
     std::thread file_copy_thread(
-        [fc = std::move(file_copier), &copyChannel, logger]()
+        [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
         {
             auto copy_res = fc->RunChannel(copyChannel);
             if (!copy_res)
             {
                 logger->error("File copy failed: {}", copy_res.error().ToString());
+                copyFailed.store(true);
             }
         });
 
@@ -364,6 +368,11 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 
     file_copy_thread.join();
 
+    if (copyFailed.load())
+    {
+        return 1;
+    }
+
     auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - scanStart)
                             .count();
@@ -405,14 +414,16 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     }
 
     // start a thread to run CopyEngine
+    std::atomic<bool> copyFailed{false};
     auto copyStart = std::chrono::steady_clock::now();
     std::thread file_copy_thread(
-        [fc = std::move(file_copier), &copyChannel, logger]()
+        [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
         {
             auto copy_res = fc->RunChannel(copyChannel);
             if (!copy_res)
             {
                 logger->error("File copy failed: {}", copy_res.error().ToString());
+                copyFailed.store(true);
             }
         });
 
@@ -425,6 +436,11 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     copyChannel.Close();
 
     file_copy_thread.join();
+
+    if (copyFailed.load())
+    {
+        return 1;
+    }
 
     auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
                             std::chrono::steady_clock::now() - copyStart)

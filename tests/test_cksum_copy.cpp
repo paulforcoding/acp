@@ -57,6 +57,7 @@ static void ensure_clean_dir(const fs::path &p)
 static RWCombinedCopyOptions make_cksum_options()
 {
     RWCombinedCopyOptions options;
+    options.IOStuckTimeout = 0;
     options.ProgramLogLevel = "error";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";

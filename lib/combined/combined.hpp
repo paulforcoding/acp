@@ -37,28 +37,28 @@ struct CopyEntry
 
 struct RWCombinedCopyOptions
 {
-    std::string ProgramLogLevel;
-    std::string ProgramLogMode;
-    std::string ProgramLogFilePath;
+    std::string ProgramLogLevel = "error";
+    std::string ProgramLogMode = "console";
+    std::string ProgramLogFilePath = "/tmp/acp_program.log";
     bool FileLogEnabled = false;
-    std::string FileLogMode;        // "console" or "file", default: "file"
+    std::string FileLogMode = "file";
     int FileLogIntervalSec = 5;
-    std::string FileLogPath;
-    std::string CopyEngine;
-    std::string CopyMode;       // "CksumCopy", "CopyOnly", "CksumOnly"
-    std::string CksumAlgorithm; // "xxhash64", "md5", "sha256"
+    std::string FileLogPath = "/tmp/acp_file_info.json";
+    std::string CopyEngine = "liburing";
+    std::string CopyMode = "CopyOnly";
+    std::string CksumAlgorithm = "xxhash64";
     int CopyParallelism = 1;
-    int CopyChanSize = 10;
+    int CopyChanSize = 100;
     bool EnableInotify = false;
-    bool PreserveSparseFiles = false;
+    bool PreserveSparseFiles = true;
     bool PreserveMeta = true;
     bool DirectIO = false;
-    bool SyncWrites = false;
-    size_t IoSize = 1 * 1024 * 1024; // 1MB
-    size_t QueueDepth = 8;
-    int Batch = 4;
-    int IOReapWait = 1; // seconds
-    int IOStuckTimeout = 0; // seconds, 0 = disabled (default)
+    bool SyncWrites = true;
+    size_t IoSize = 131072;
+    size_t QueueDepth = 16;
+    int Batch = 8;
+    int IOReapWait = 1;
+    int IOStuckTimeout = 10;
 };
 
 // 这个类提供源文件和目标文件的信息，并且IO计数的功能，并且负责打开和关闭文件描述符、复制attr extended-attributes等
