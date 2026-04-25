@@ -1190,7 +1190,6 @@ protected:
                 if (ioSlot->GetCPFPPtr()->GetCksumError())
                 {
                     ioSlot->GetCPFPPtr()->SetReadFinished(); // mark read as finished to avoid further reads
-                    ioSlot->Reset();                         // reset the slot for next use
                 }
 
                 // cksum normally done, act like we've done the write

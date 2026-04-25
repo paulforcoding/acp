@@ -3,6 +3,8 @@
 #include "base/logger.hpp"
 #include <filesystem>
 #include <fstream>
+#include <thread>
+#include <chrono>
 #include <fcntl.h>
 
 namespace fs = std::filesystem;
@@ -267,6 +269,8 @@ TEST_CASE("CPFilePair CksumCopy size_mtime fast path", "[cpfilepair]")
         std::string buf(1024, 'X');
         ofs.write(buf.data(), buf.size());
     }
+    // Ensure different mtime so the size+mtime fast path does not trigger
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     {
         std::ofstream ofs(dst, std::ios::binary);
         std::string buf(1024, 'Y');

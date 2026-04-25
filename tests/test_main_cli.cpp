@@ -9,7 +9,17 @@ namespace fs = std::filesystem;
 
 static int run_acp(const std::string &args)
 {
-    std::string cmd = "./build/acp " + args + " >/dev/null 2>&1";
+    // Try ./build/acp first (when running from repo root),
+    // then fall back to ./acp (when running from build/).
+    std::string cmd;
+    if (fs::exists("./build/acp"))
+    {
+        cmd = "./build/acp " + args + " >/dev/null 2>&1";
+    }
+    else
+    {
+        cmd = "./acp " + args + " >/dev/null 2>&1";
+    }
     int rc = std::system(cmd.c_str());
     if (rc == -1)
         return -1;
