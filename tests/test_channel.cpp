@@ -107,13 +107,11 @@ TEST_CASE("Channel Size concurrent", "[channel][thread]")
     // Third thread continuously calls Size() while producer/consumer are active
     std::thread sizer([&]()
                       {
-        int size_call_count = 0;
         while (popped.load() < kTotalItems || !done.load())
         {
             int sz = ch.Size();
             REQUIRE(sz >= 0);
             REQUIRE(sz <= kCapacity);
-            ++size_call_count;
         }
     });
 

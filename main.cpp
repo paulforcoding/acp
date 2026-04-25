@@ -168,6 +168,7 @@ int main(int argc, char *argv[])
        ->required()
        ->expected(-1);
 
+    app.set_help_all_flag("--help-all", "Show all help including configuration options");
     app.set_version_flag("--version,-v", kVersion);
 
     // ---------- 配置合并优先级：默认值 → /etc/acp_config.json → ~/acp_config.json → ./acp_config.json → CLI 参数 ----------
