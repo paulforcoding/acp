@@ -23,6 +23,9 @@
 #define ALIGN_MASK(x, mask) (((x) + (mask)) & ~(mask))
 #define ALIGN(x, a) ALIGN_MASK(x, (decltype(x))(a) - 1)
 
+// 扇区对齐分配：Direct I/O 要求缓冲区按扇区大小对齐，否则 io_submit 返回 EINVAL
+char *AllocBytes(size_t align, size_t bytes);
+
 class AcpException : public std::runtime_error
 {
 private:
@@ -30,8 +33,6 @@ private:
 public:
     AcpException(std::string_view msg) : std::runtime_error(msg.data()) {};
 };
-
-char *AllocBytes(size_t align, size_t bytes);
 
 template <typename T, typename = typename std::is_pointer<T>>
 void FreeBytes(T &p)
@@ -43,7 +44,9 @@ void FreeBytes(T &p)
 template <typename... Args>
 using format_string_t = fmt::format_string<Args...>;
 
-// 此class是结合tl::expected使用的，用于串联函数调用栈各函数的返回值，not thread-safe
+// StackError: 与 tl::expected 配合使用的错误链类型。
+// 设计意图：跨调用栈串联错误上下文（最新错误在前），使 Agent 能追踪完整失败路径。
+// 非线程安全，仅在单线程错误传播路径中使用。
 class StackError
 {
 public:
@@ -123,7 +126,9 @@ inline tl::unexpected<StackError> Unexpt(const StackError &se)
 // void InitGlobalFileLogger(const std::string &filePath, spdlog::level::level_enum log_level);
 // std::shared_ptr<spdlog::logger> GetGlobalLogger();
 
-// 通用的，记录各个函数运行时间的类
+// FuncDurationStat: 线程安全的函数耗时统计器。
+// 设计意图：多线程异步 I/O 场景下收集各阶段耗时，用于性能分析和瓶颈定位。
+// 使用 mutex 保护 mStats，避免并发 AddDuration 导致数据竞争。
 class FuncDurationStat
 {
 public:

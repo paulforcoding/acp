@@ -15,6 +15,8 @@
 #include "lib/combined/combined.hpp"
 #include "base/chan.hpp"
 
+// Linux libaio 后端：基于 io_setup / io_submit / io_getevents 的内核原生异步 IO
+// 与 io_uring 不同，libaio 的提交与收割是分离的系统调用，需显式维护 iocb 数组
 class AIOSlotMgr : public IOSlotMgr<IOSlot>
 {
 public:
@@ -32,7 +34,7 @@ public:
     }
 
 private:
-    // implement virtual functions from IOSlotMgr
+    // 实现 IOSlotMgr 的纯虚接口，适配 libaio 的 iocb / io_event 模型
     tl::expected<void, StackError> Init() override;
     void DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override;
     void PrepareOneWrite(IOSlot *slot) override;

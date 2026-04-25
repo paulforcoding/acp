@@ -29,6 +29,8 @@ class Channel
 {
 protected:
     static constexpr int CHANNEL_SIZE_DEFAULT = 1;
+    // 有界队列：生产者满时自旋 sleep，而非 condition_variable_push。
+    // 设计意图：避免 libaio/io_uring 后端在高并发提交时因条件变量唤醒延迟产生尾延迟。
     static constexpr int MICRO_SLEEP_TIME = 1; // ms
 
     mutable std::mutex mMutex;
@@ -57,6 +59,8 @@ public:
     {
         return mDone.test();
     }
+    // Close 语义：关闭后 Pop 返回空 expected（Channel is closed），Push 抛出异常。
+    // 设计意图：让消费者优雅退出，同时阻止新数据流入。
     void Close()
     {
         mDone.test_and_set();
@@ -115,6 +119,7 @@ protected:
     mutable std::mutex mMutex;
     std::condition_variable mCondVar;
     std::deque<std::string> mQueue;
+    // mQueueIdx: 与 mQueue 并行维护的去重索引，保证 Push 去重和 Pop 清理均为 O(1)
     std::unordered_set<std::string> mQueueIdx; // for deduplication
 
     // initialize atomic_flag for C++17 (no default ctor prior to C++20)
@@ -188,6 +193,8 @@ class DedupList
 {
 protected:
     mutable std::mutex mMutex;
+    // list + unordered_set 组合：list 维护插入顺序和稳定迭代器，unordered_set 提供 O(1) 去重查找。
+    // 纯 set 会丢失顺序且无法快速按指针移除；此组合兼顾去重、顺序和生命周期管理。
     std::list<std::shared_ptr<ElemType>> mList;
     std::unordered_set<std::string> mQueueIdx; // for deduplication
 

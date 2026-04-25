@@ -13,6 +13,9 @@
 #endif
 #endif
 
+// CopyEngine: 复制引擎，负责将 CopyEntry 分发给多个工作线程并行复制
+// 线程模型：CopyParallelism 个线程各拥有一个 CPFilePairMgr，独立执行 RunQueue
+// Channel 分发策略：主线程轮询（round-robin）将文件对均匀分配到各 CPFilePairMgr
 class CopyEngine
 {
 public:
@@ -25,9 +28,10 @@ public:
           mFuncDurationStat(funcDurationStat),
           mReporter(reporter) {};
 
+    // RunChannel: 主线程生命周期 — 启动工作线程 → 轮询分发文件对 → 关闭 Channel → join 线程 → 处理延迟目录元数据
     tl::expected<void, StackError> RunChannel(Channel<CopyEntry> &channel)
     {
-        // 根据options.CopyParallelism启动多个RunQueue线程
+        // 根据 CopyParallelism 创建对应数量的 CPFilePairMgr 和线程，每个线程独立执行 RunQueue
         mLogger->debug("CopyEngine: Starting {} RunQueue threads.", mOptions.CopyParallelism);
         std::vector<std::thread> threads;
         threads.reserve(mOptions.CopyParallelism);
@@ -41,11 +45,12 @@ public:
             threads.emplace_back(&CopyEngine::startCopyThread, this, cpfpMgrs.back().get(), std::ref(threadErrors[i]));
         }
 
+        // 多线程且保留元数据时延迟处理目录：避免并发修改同一目录的权限/时间戳导致竞态
         bool deferDirs = (mOptions.CopyParallelism > 1 && mOptions.PreserveMeta);
         std::vector<std::unique_ptr<CopyEntry>> deferredDirs;
         deferredDirs.reserve(100);
 
-        // 主线程负责从channel中取出CopyEntry，分发到各个CPFilePairMgr中
+        // 主线程轮询从 Channel 取出 CopyEntry，均匀分发到各 CPFilePairMgr
         size_t round_robin_idx = 0;
         while (true)
         {
@@ -75,7 +80,7 @@ public:
                 return tl::unexpected(StackError("cpfpMgr.AddFilePair(), err: ", add_file_pair_res.error()));
             }
         }
-        // 所有文件对添加完毕，通知各个CPFilePairMgr停止
+        // 所有文件对分发完毕，通知各 CPFilePairMgr 停止；工作线程在排空剩余 I/O 后自然退出
         mLogger->debug("CopyEngine: All file pairs added, signaling stop to CPFilePairMgrs.");
         for (auto &cpfpMgr : cpfpMgrs)
         {
@@ -100,7 +105,7 @@ public:
             }
         }
 
-        // Process deferred directories in LIFO order (deepest first)
+        // 按 LIFO（最深优先）顺序处理延迟目录，确保子目录元数据先于父目录恢复
         if (deferDirs)
         {
             mLogger->debug("CopyEngine: Processing {} deferred directories.", deferredDirs.size());
@@ -138,6 +143,7 @@ public:
     }
 
 private:
+    // 每个工作线程的入口：根据平台/配置选择后端（libaio / liburing / GCD），然后执行 RunQueue 主循环
     void startCopyThread(CPFilePairMgr *cpfpMgr, std::optional<StackError> &outError)
     {
         std::unique_ptr<IOSlotMgr<IOSlot>> slotMgr;

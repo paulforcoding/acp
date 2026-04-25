@@ -224,6 +224,9 @@ inline bool IsAllZeros(const char *buf, size_t len)
     return true;
 }
 
+// CPFilePairMgr: 管理单个工作线程的文件对队列（FPChannel）及 IO 完成检测。
+// 设计意图：每个 CopyEngine 线程拥有一个实例，负责从 Channel 取出文件对、
+// 跟踪读取/写入完成状态，并协调与 IOSlotMgr 的三阶段循环（SubmitReads → IOReap → SubmitWrites）。
 class CPFilePairMgr
 {
 public:
@@ -265,6 +268,9 @@ private:
     FPChannel mChannel;
 };
 
+// IOSlot: 单个异步 IO 缓冲区的状态机载体。
+// 设计意图：每个 slot 代表一个 inflight IO，状态从 Init 依次流转到 WriteReaped。
+// libaio 使用 iocb 结构体，io_uring 使用 sqe/cqe，GCD 使用 mReadFd —— 各后端按需使用各自字段。
 class IOSlot
 {
 public:
@@ -406,7 +412,9 @@ private:
     IOSlot *mAssociatedSlot = nullptr;
 };
 
-// abstract class for IOSlotMgr, use as interface
+// IOSlotMgr: 异步 IO 管理器的抽象模板基类，三阶段主循环（SubmitReads → IOReap → SubmitWrites）。
+// 设计意图：解耦后端差异（libaio / io_uring / GCD）与通用逻辑（状态机推进、校验和比较、完成检测）。
+// RunQueue() 是各工作线程的核心循环，直到 FPChannel 关闭且所有 inflight IO 完成才退出。
 template <typename SlotType = IOSlot>
 class IOSlotMgr
 {

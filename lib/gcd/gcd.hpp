@@ -9,6 +9,8 @@
 #include <condition_variable>
 #include <queue>
 
+// macOS GCD 后端：利用 dispatch_group_async 在线程池上执行 pread/pwrite 模拟异步 IO
+// 无内核原生异步 IO 支持，因此不需要显式 SubmitBatch，提交即派发；通过线程安全队列收割完成事件
 class GCDSlotMgr : public IOSlotMgr<IOSlot>
 {
 public:
@@ -38,7 +40,8 @@ private:
 
     void DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override
     {
-        // Save read parameters so SubmitBatchRead doesn't need to know rw vs cksum
+        // GCD 无 iocb 概念，仅保存 fd，实际的 buf/ioSize/offset 在 SubmitBatchRead 时从 slot 重新获取
+        // 这样 SubmitBatchRead 无需区分 rw 与 cksum 的传参差异
         slot->SetReadFd(fd);
         (void)buf;
         (void)ioSize;
@@ -64,6 +67,8 @@ private:
             int fd = slot->GetReadFd();
             void *buf = slot->GetBuf();
 
+            // 每次 dispatch_group_async 即将任务加入全局并发队列，提交即执行，无需显式 flush
+            // 与 libaio/io_uring 的批量提交不同，GCD 的“批量”只是连续派发多个 block
             dispatch_group_async(mGroup, mQueue, ^{
                 ssize_t ret = pread(fd, buf, ioSize, offset);
                 if (ret < 0)
@@ -86,6 +91,7 @@ private:
             int fd = slot->GetCPFPPtr()->GetDstFd();
             void *buf = slot->GetBuf();
 
+            // 写派发与读对称：block 内同步执行 pwrite，完成后将结果推入线程安全队列
             dispatch_group_async(mGroup, mQueue, ^{
                 ssize_t ret = pwrite(fd, buf, ioSize, offset);
                 if (ret < 0)
@@ -102,6 +108,8 @@ private:
     {
         std::vector<CompletionEvent> events;
         {
+            // 使用条件变量 + 互斥锁实现线程安全的完成队列，与 libaio/io_uring 的内核完成事件不同
+            // 超时由 IOReapWait 控制，避免空转；若超时无事件则返回空，由上层继续循环
             std::unique_lock<std::mutex> lock(mQueueMutex);
             auto deadline = std::chrono::steady_clock::now()
                           + std::chrono::seconds(mOptions.IOReapWait);
@@ -123,6 +131,7 @@ private:
                 auto readRes = HandleReadCompletion(ev.slot, ev.result);
                 if (!readRes)
                 {
+                    // GCD 后端目前仅记录日志，不通过 tl::unexpected 中断 RunQueue，与 Linux 后端的错误传播策略不同
                     mLogger->error("HandleReadCompletion failed: {}", readRes.error().ToString());
                 }
             }

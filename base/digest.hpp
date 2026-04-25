@@ -18,6 +18,8 @@
 #define ACP_EVP_MD_CTX_FREE(ctx) EVP_MD_CTX_free(ctx)
 #endif
 
+// Digest 接口：统一封装三种校验和算法，使复制引擎可按配置切换而无需改动核心逻辑。
+// 支持 MD5/SHA256（OpenSSL，兼容性与安全性）和 XXHash64（极致性能）。
 class Digest
 {
 public:
@@ -74,6 +76,8 @@ public:
         return std::string(buf);
     }
 };
+// XXHash64Digest: 默认推荐算法。XXHash64 在 CPU 缓存友好性和吞吐上远优于加密哈希，
+// 适用于大规模数据迁移中的块级校验场景（防碰撞需求由应用层保证）。
 class XXHash64Digest : public Digest
 {
 public:
