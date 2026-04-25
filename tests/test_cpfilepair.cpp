@@ -1,6 +1,7 @@
 #include "lib/thirdparty/catch2/catch_amalgamated.hpp"
 #include "lib/combined/combined.hpp"
 #include "base/logger.hpp"
+#include "tests/test_run_logger.hpp"
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -230,6 +231,7 @@ TEST_CASE("CPFilePair zero size file", "[cpfilepair]")
 
 TEST_CASE("CPFilePair DoDstState", "[cpfilepair]")
 {
+    LOG_TEST_SCOPE("CPFilePair DoDstState");
     std::string src = "tests/tmp_dodst_src.dat";
     std::string dst = "tests/tmp_dodst_dst.dat";
 
