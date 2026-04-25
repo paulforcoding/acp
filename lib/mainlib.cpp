@@ -123,82 +123,20 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
     }
 }
 
-int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger, std::atomic<bool> *stopFlag)
+// Scan a single source directory and push all entries into the shared channel.
+// Stats are accumulated into the caller-provided counters.
+static int ScanDirIntoChannel(const fs::path &src_p,
+                              const fs::path &dst_p,
+                              Channel<CopyEntry> &copyChannel,
+                              FileLogReporter *reporter,
+                              std::shared_ptr<ILogger> logger,
+                              size_t &filesSeen,
+                              size_t &dirsSeen,
+                              size_t &symlinksSeen,
+                              size_t &bytesSeen,
+                              size_t &filesRegular,
+                              size_t &filesUnsupported)
 {
-#ifdef __APPLE__
-    if (options.DirectIO)
-    {
-        logger->error("DirectIO is not supported on macOS");
-        return 1;
-    }
-#endif
-    // deal with inotify if enabled
-    InotifyChannel iChan;
-#ifdef __APPLE__
-    FSEventsWatcher inotifyWatcher(src_p.string(), logger);
-#else
-    Inotify inotifyWatcher(src_p.string(), logger);
-#endif
-    std::thread inotifyThread;
-    std::atomic<bool> inotifyStopRequested{false};
-    if (options.EnableInotify)
-    {
-        auto add_watch_res = inotifyWatcher.Init();
-        if (!add_watch_res)
-        {
-            logger->error("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().ToString());
-            return 1;
-        }
-        // start a thread to read inotify events and push to copyChannel
-        inotifyThread = std::thread(
-            [&inotifyWatcher, &iChan, logger, &inotifyStopRequested]()
-            {
-                while (!inotifyStopRequested.load())
-                {
-                    auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
-                    if (!read_res)
-                    {
-                        if (inotifyWatcher.IsClosed())
-                            break;
-                        logger->error("Inotify read event failed: {}", read_res.error().ToString());
-                    }
-                }
-            });
-    }
-    // 开始创建各种对象，注入依赖
-    Channel<CopyEntry> copyChannel(options.CopyChanSize);
-    auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
-    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
-
-    std::atomic<bool> copyFailed{false};
-
-    // start a thread to run CopyEngine
-    std::thread file_copy_thread(
-        [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
-        {
-            auto copy_res = fc->RunChannel(copyChannel);
-            if (!copy_res)
-            {
-                logger->error("File copy failed: {}", copy_res.error().ToString());
-                copyFailed.store(true);
-            }
-        });
-
-    // create dst_dir if not exist
-    if (!fs::exists(dst_p))
-    {
-        std::error_code ec;
-        fs::create_directories(dst_p, ec);
-        if (ec)
-        {
-            logger->error("Failed to create destination directory: {}, errstr: {}", dst_p.string(), ec.message());
-            return 1;
-        }
-    }
-
-    // recursively walk through source directory and prepare file pairs
-    // using post-order DFS with explicit stack (readdir + lstat, each path stat once)
     struct ScanFrame
     {
         std::string srcPath;
@@ -207,14 +145,6 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         bool childrenProcessed = false;
     };
 
-    size_t filesSeen = 0;
-    size_t dirsSeen = 0;
-    size_t symlinksSeen = 0;
-    size_t bytesSeen = 0;
-    size_t filesRegular = 0;
-    size_t filesUnsupported = 0;
-    auto scanStart = std::chrono::steady_clock::now();
-
     DIR *rootDir = opendir(src_p.c_str());
     if (!rootDir)
     {
@@ -222,9 +152,6 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         return 1;
     }
 
-    // Use deque instead of vector because push_back to deque does not invalidate
-    // references to existing elements, avoiding use-after-free when frame is a
-    // reference to scanStack.back() and we push a child directory.
     std::deque<ScanFrame> scanStack;
     scanStack.push_back({src_p.string(), dst_p.string(), rootDir, false});
 
@@ -311,6 +238,103 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             closedir(frame.dir);
             scanStack.pop_back();
         }
+    }
+
+    return 0;
+}
+
+int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger, std::atomic<bool> *stopFlag)
+{
+#ifdef __APPLE__
+    if (options.DirectIO)
+    {
+        logger->error("DirectIO is not supported on macOS");
+        return 1;
+    }
+#endif
+    // deal with inotify if enabled
+    InotifyChannel iChan;
+#ifdef __APPLE__
+    FSEventsWatcher inotifyWatcher(src_p.string(), logger);
+#else
+    Inotify inotifyWatcher(src_p.string(), logger);
+#endif
+    std::thread inotifyThread;
+    std::atomic<bool> inotifyStopRequested{false};
+    if (options.EnableInotify)
+    {
+        auto add_watch_res = inotifyWatcher.Init();
+        if (!add_watch_res)
+        {
+            logger->error("Failed to add inotify init for path: {}, err: {}", src_p.string(), add_watch_res.error().ToString());
+            return 1;
+        }
+        // start a thread to read inotify events and push to copyChannel
+        inotifyThread = std::thread(
+            [&inotifyWatcher, &iChan, logger, &inotifyStopRequested]()
+            {
+                while (!inotifyStopRequested.load())
+                {
+                    auto read_res = inotifyWatcher.ReadEventToChannel(iChan);
+                    if (!read_res)
+                    {
+                        if (inotifyWatcher.IsClosed())
+                            break;
+                        logger->error("Inotify read event failed: {}", read_res.error().ToString());
+                    }
+                }
+            });
+    }
+    // 开始创建各种对象，注入依赖
+    Channel<CopyEntry> copyChannel(options.CopyChanSize);
+    auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
+    auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
+
+    std::atomic<bool> copyFailed{false};
+
+    // start a thread to run CopyEngine
+    std::thread file_copy_thread(
+        [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
+        {
+            auto copy_res = fc->RunChannel(copyChannel);
+            if (!copy_res)
+            {
+                logger->error("File copy failed: {}", copy_res.error().ToString());
+                copyFailed.store(true);
+            }
+        });
+
+    // create dst_dir if not exist
+    if (!fs::exists(dst_p))
+    {
+        std::error_code ec;
+        fs::create_directories(dst_p, ec);
+        if (ec)
+        {
+            logger->error("Failed to create destination directory: {}, errstr: {}", dst_p.string(), ec.message());
+            return 1;
+        }
+    }
+
+    // recursively walk through source directory and prepare file pairs
+    // using post-order DFS with explicit stack (readdir + lstat, each path stat once)
+    size_t filesSeen = 0;
+    size_t dirsSeen = 0;
+    size_t symlinksSeen = 0;
+    size_t bytesSeen = 0;
+    size_t filesRegular = 0;
+    size_t filesUnsupported = 0;
+    auto scanStart = std::chrono::steady_clock::now();
+
+    int scanRc = ScanDirIntoChannel(src_p, dst_p, copyChannel, reporter.get(), logger,
+                                    filesSeen, dirsSeen, symlinksSeen,
+                                    bytesSeen, filesRegular, filesUnsupported);
+    if (scanRc != 0)
+    {
+        copyChannel.Close();
+        file_copy_thread.join();
+        return 1;
     }
 
     if (reporter)
@@ -451,5 +475,129 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 
     funcDurationStat->PrintStats();
 
+    return 0;
+}
+
+int CopyBatch(const std::vector<std::pair<fs::path, fs::path>> &srcDstPairs,
+              const RWCombinedCopyOptions &options,
+              std::shared_ptr<ILogger> logger)
+{
+#ifdef __APPLE__
+    if (options.DirectIO)
+    {
+        logger->error("DirectIO is not supported on macOS");
+        return 1;
+    }
+#endif
+
+    Channel<CopyEntry> copyChannel(options.CopyChanSize);
+    auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode,
+                                                      options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
+    auto fileCopier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
+
+    std::atomic<bool> copyFailed{false};
+    std::thread fileCopyThread(
+        [fc = std::move(fileCopier), &copyChannel, logger, &copyFailed]()
+        {
+            auto copyRes = fc->RunChannel(copyChannel);
+            if (!copyRes)
+            {
+                logger->error("File copy failed: {}", copyRes.error().ToString());
+                copyFailed.store(true);
+            }
+        });
+
+    size_t filesSeen = 0;
+    size_t dirsSeen = 0;
+    size_t symlinksSeen = 0;
+    size_t bytesSeen = 0;
+    size_t filesRegular = 0;
+    size_t filesUnsupported = 0;
+    auto batchStart = std::chrono::steady_clock::now();
+
+    for (const auto &[src, dst] : srcDstPairs)
+    {
+        if (fs::is_directory(src))
+        {
+            if (!fs::exists(dst))
+            {
+                std::error_code ec;
+                fs::create_directories(dst, ec);
+                if (ec)
+                {
+                    logger->error("Failed to create destination directory: {}, errstr: {}", dst.string(), ec.message());
+                    continue;
+                }
+            }
+
+            int scanRc = ScanDirIntoChannel(src, dst, copyChannel, reporter.get(), logger,
+                                            filesSeen, dirsSeen, symlinksSeen,
+                                            bytesSeen, filesRegular, filesUnsupported);
+            if (scanRc != 0)
+            {
+                logger->error("Scan failed for source: {}", src.string());
+            }
+        }
+        else if (fs::is_regular_file(src))
+        {
+            struct stat st;
+            if (lstat(src.c_str(), &st) == 0)
+            {
+                auto ce = std::make_unique<CopyEntry>();
+                ce->srcPath = src.string();
+                ce->dstPath = dst.string();
+                ce->srcStat = st;
+                copyChannel.Push(ce);
+
+                filesSeen++;
+                filesRegular++;
+                bytesSeen += st.st_size;
+
+                if (reporter)
+                {
+                    reporter->FileStart(src.string(), dst.string(), st.st_size);
+                }
+            }
+            else
+            {
+                logger->warn("lstat failed for {}: errno={}", src.string(), errno);
+                filesSeen++;
+            }
+        }
+        else
+        {
+            logger->warn("Unsupported source type in batch: {}", src.string());
+            filesUnsupported++;
+            filesSeen++;
+        }
+    }
+
+    if (reporter)
+    {
+        reporter->CopyPlan("completed", filesSeen, dirsSeen, symlinksSeen,
+                           bytesSeen, filesRegular, filesUnsupported);
+        reporter->SetFilesTotal(filesSeen);
+        reporter->SetBytesTotal(bytesSeen);
+    }
+
+    copyChannel.Close();
+    fileCopyThread.join();
+
+    if (copyFailed.load())
+    {
+        return 1;
+    }
+
+    auto copyDuration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            std::chrono::steady_clock::now() - batchStart)
+                            .count();
+    if (reporter)
+    {
+        reporter->CopyComplete(copyDuration);
+        reporter->FinalizeStateFile();
+    }
+
+    funcDurationStat->PrintStats();
     return 0;
 }

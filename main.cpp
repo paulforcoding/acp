@@ -295,6 +295,8 @@ int main(int argc, char *argv[])
     }
 
     bool anyFailed = false;
+    std::vector<std::pair<fs::path, fs::path>> batchPairs;
+    batchPairs.reserve(srcPaths.size());
 
     for (const auto& src_path : srcPaths)
     {
@@ -396,34 +398,64 @@ int main(int argc, char *argv[])
         }
 
         // Dispatch copy
-        if (fs::is_directory(src_p) && fs::is_directory(dst_p))
+        bool dstIsDir = multiSource ? fs::is_directory(dstPath) : (fs::exists(dst_p) && fs::is_directory(dst_p));
+
+        if (fs::is_directory(src_p) && dstIsDir)
         {
-            fs::path final_dst = dst_p / src_p.filename();
-            logger->warn("begin to copy directory: {} to directory: {}", src_p.string(), final_dst.string());
-            int rc = CopyDir(src_p, final_dst, options, logger);
-            if (rc != 0)
-                anyFailed = true;
+            fs::path final_dst = multiSource ? dst_p : dst_p / src_p.filename();
+            if (multiSource)
+            {
+                batchPairs.emplace_back(src_p, final_dst);
+            }
+            else
+            {
+                logger->warn("begin to copy directory: {} to directory: {}", src_p.string(), final_dst.string());
+                int rc = CopyDir(src_p, final_dst, options, logger);
+                if (rc != 0)
+                    anyFailed = true;
+            }
         }
-        else if (fs::is_regular_file(src_p) && fs::is_directory(dst_p))
+        else if (fs::is_regular_file(src_p) && dstIsDir)
         {
-            fs::path final_dst = dst_p / src_p.filename();
-            logger->info("begin to copy file: {} to file: {}", src_p.string(), final_dst.string());
-            int rc = CopyFile(src_p, final_dst, options, logger);
-            if (rc != 0)
-                anyFailed = true;
+            fs::path final_dst = multiSource ? dst_p : dst_p / src_p.filename();
+            if (multiSource)
+            {
+                batchPairs.emplace_back(src_p, final_dst);
+            }
+            else
+            {
+                logger->info("begin to copy file: {} to file: {}", src_p.string(), final_dst.string());
+                int rc = CopyFile(src_p, final_dst, options, logger);
+                if (rc != 0)
+                    anyFailed = true;
+            }
         }
         else if (fs::is_regular_file(src_p))
         {
-            logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
-            int rc = CopyFile(src_p, dst_p, options, logger);
-            if (rc != 0)
-                anyFailed = true;
+            if (multiSource)
+            {
+                batchPairs.emplace_back(src_p, dst_p);
+            }
+            else
+            {
+                logger->info("begin to copy file: {} to file: {}", src_p.string(), dst_p.string());
+                int rc = CopyFile(src_p, dst_p, options, logger);
+                if (rc != 0)
+                    anyFailed = true;
+            }
         }
         else
         {
             std::cerr << "Unsupported source type: " << src_p.string() << std::endl;
             anyFailed = true;
         }
+    }
+
+    if (multiSource && !anyFailed && !batchPairs.empty())
+    {
+        int rc = CopyBatch(batchPairs, options, logger);
+        if (rc != 0)
+            anyFailed = true;
     }
 
     return anyFailed ? 1 : 0;
