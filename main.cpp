@@ -131,9 +131,12 @@ int main(int argc, char *argv[])
     app.add_option("--log-file", optLogFile, "Program log file path");
     app.add_option("--file-log-mode", optFileLogMode, "File log mode (console/file)");
     app.add_option("--file-log-path", optFileLogPath, "File log output path");
-    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)");
-    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)");
-    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)");
+    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)")
+        ->check(CLI::IsMember({"libaio", "liburing", "gcd"}));
+    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)")
+        ->check(CLI::IsMember({"CopyOnly", "CksumCopy", "CksumOnly"}));
+    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)")
+        ->check(CLI::IsMember({"xxhash64", "md5", "sha256"}));
 
     // Numeric options
     app.add_option("--file-log-interval", optFileLogInterval, "File log flush interval (sec)")->check(CLI::PositiveNumber);
