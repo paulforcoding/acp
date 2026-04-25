@@ -252,3 +252,117 @@ TEST_CASE("CPFilePair DoDstState", "[cpfilepair]")
     fs::remove(src, ec);
     fs::remove(dst, ec);
 }
+
+TEST_CASE("CPFilePair CksumCopy size_mtime fast path", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_ckfast_src.dat";
+    std::string dst = "tests/tmp_ckfast_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(1024, 'X');
+        ofs.write(buf.data(), buf.size());
+    }
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        std::string buf(1024, 'Y');
+        ofs.write(buf.data(), buf.size());
+    }
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Same size but different mtime — fast path should NOT trigger
+    REQUIRE_FALSE(p.IsSkipBlockCksum());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair CksumCopy fast path same mtime", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_ckfast2_src.dat";
+    std::string dst = "tests/tmp_ckfast2_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    // Create both files with identical mtime
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(1024, 'A');
+        ofs.write(buf.data(), buf.size());
+    }
+    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    // Copy preserves mtime on APFS, but if not, force it
+    fs::last_write_time(dst, fs::last_write_time(src), ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Same size and same mtime — fast path SHOULD trigger
+    REQUIRE(p.IsSkipBlockCksum());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair IsAllZeros all zero", "[cpfilepair]")
+{
+    std::vector<char> buf(4096, 0);
+    REQUIRE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair IsAllZeros not zero", "[cpfilepair]")
+{
+    std::vector<char> buf(4096, 0);
+    buf[100] = 1;
+    REQUIRE_FALSE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair IsAllZeros unaligned size", "[cpfilepair]")
+{
+    std::vector<char> buf(7, 0);
+    REQUIRE(IsAllZeros(buf.data(), buf.size()));
+    buf[3] = 1;
+    REQUIRE_FALSE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair short read does not overestimate", "[cpfilepair]")
+{
+    // Bug #5: UpdatePrepareReadBytes(io_size) overestimates on short reads.
+    std::string src = "tests/tmp_shortread_src.dat";
+    std::string dst = "tests/tmp_shortread_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(100, 'Z');
+        ofs.write(buf.data(), buf.size());
+    }
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Simulate a read larger than file size
+    p.UpdatePrepareReadBytes(1024);
+    // mReadBytes now exceeds file size, IsReadFinished is true
+    REQUIRE(p.IsReadFinished());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}

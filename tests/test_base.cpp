@@ -91,3 +91,57 @@ TEST_CASE("Inotify invalid path returns expected", "[inotify]")
     auto res = watcher.Init();
     REQUIRE_FALSE(res.has_value());
 }
+
+TEST_CASE("StackError is not std exception", "[base]")
+{
+    // Bug #1: StackError does not inherit std::exception.
+    // This means catch (const std::exception&) will miss it.
+    StackError err("test error", 42);
+    bool caught_as_exception = false;
+    try
+    {
+        throw err;
+    }
+    catch (const std::exception &)
+    {
+        caught_as_exception = true;
+    }
+    catch (const StackError &)
+    {
+        caught_as_exception = false;
+    }
+    REQUIRE_FALSE(caught_as_exception);
+}
+
+TEST_CASE("StackError FromFormat basic", "[base]")
+{
+    auto err = StackError::FromFormat("code={}, msg={}", 42, "hello");
+    REQUIRE(err.Code() == 42);
+    REQUIRE(std::string(err.ToString()).find("code=42, msg=hello") != std::string::npos);
+}
+
+TEST_CASE("StackError Append chain", "[base]")
+{
+    StackError err("first");
+    err.Append("second: {}", 2);
+    err.Append("third: {}", 3);
+    auto msg = std::string(err.ToString());
+    REQUIRE(msg.find("first") != std::string::npos);
+    REQUIRE(msg.find("second: 2") != std::string::npos);
+    REQUIRE(msg.find("third: 3") != std::string::npos);
+}
+
+TEST_CASE("AllocBytes alignment 512", "[base]")
+{
+    char *p = AllocBytes(512, 1024);
+    REQUIRE(p != nullptr);
+    REQUIRE(reinterpret_cast<uintptr_t>(p) % 512 == 0);
+    FreeBytes(p);
+}
+
+TEST_CASE("FreeBytes null safety", "[base]")
+{
+    char *p = nullptr;
+    FreeBytes(p); // should not crash
+    REQUIRE(p == nullptr);
+}
