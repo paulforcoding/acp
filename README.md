@@ -70,17 +70,21 @@ brew install spdlog openssl xxhash
 Requires CMake 3.20+.
 
 ```bash
-# Configure (default: static linking)
+# Configure (default: dynamic linking)
 cmake -B build
 
 # Linux: enable io_uring backend
 cmake -B build -DENABLE_LIBURING=ON
 
-# macOS / dynamic linking
-cmake -B build -DBUILD_STATIC=OFF
+# Static linking (Linux only)
+cmake -B build -DBUILD_STATIC=ON
 
 # Compile
 cmake --build build -j$(nproc)
+
+# Install / Uninstall
+cmake --build build --target install   # default prefix: /usr/local
+cmake --build build --target uninstall
 ```
 
 Build artifacts are placed under `build/`:

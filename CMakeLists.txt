@@ -265,6 +265,40 @@ if(BUILD_TESTS)
 endif()
 
 # ---------------------------------------------------------------------------
+# Install rules
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+
+install(TARGETS acp
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(FILES
+    acp_config.json
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/examples
+)
+
+install(FILES
+    README.md
+    README.zh.md
+    LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+)
+
+# ---------------------------------------------------------------------------
+# Uninstall support
+# ---------------------------------------------------------------------------
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/cmake_uninstall.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake"
+    IMMEDIATE @ONLY
+)
+
+add_custom_target(uninstall
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_CURRENT_BINARY_DIR}/cmake_uninstall.cmake
+)
+
+# ---------------------------------------------------------------------------
 # compile_commands.json for clangd / IDE
 # ---------------------------------------------------------------------------
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE INTERNAL "")
