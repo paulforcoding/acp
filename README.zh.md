@@ -84,9 +84,8 @@ cmake -B build -DBUILD_STATIC=ON
 # 编译
 cmake --build build -j$(nproc)
 
-# 安装 / 卸载
+# 安装
 cmake --build build --target install   # 默认 prefix: /usr/local
-cmake --build build --target uninstall
 ```
 
 编译产物位于 `build/`：

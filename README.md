@@ -82,9 +82,8 @@ cmake -B build -DBUILD_STATIC=ON
 # Compile
 cmake --build build -j$(nproc)
 
-# Install / Uninstall
+# Install
 cmake --build build --target install   # default prefix: /usr/local
-cmake --build build --target uninstall
 ```
 
 Build artifacts are placed under `build/`:
