@@ -3,6 +3,7 @@
 #include "base/logger.hpp"
 #include <filesystem>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace fs = std::filesystem;
 
@@ -61,10 +62,12 @@ TEST_CASE("CPFilePair dst directory creation failure", "[cpfilepair][error]")
 
 TEST_CASE("CPFilePair open src EACCES", "[cpfilepair][error]")
 {
-    // macOS: owner can still open files with mode 000, so skip on macOS
+    // macOS and root users can open files with mode 000
 #ifdef __APPLE__
     return;
 #endif
+    if (geteuid() == 0)
+        return;
 
     std::string src = "tests/tmp_eacces_src.dat";
     std::string dst = "tests/tmp_eacces_dst.dat";
