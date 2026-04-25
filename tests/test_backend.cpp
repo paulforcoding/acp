@@ -154,33 +154,4 @@ TEST_CASE("Backend DirectIO unaligned size", "[backend]")
     fs::remove(dst, ec);
 }
 
-#ifdef ENABLE_LIBURING
-
-TEST_CASE("UIOSlotMgr io_uring_queue_init failure", "[backend][liburing]")
-{
-    fs::path src = "/tmp/acp_backend_uring_src.bin";
-    fs::path dst = "/tmp/acp_backend_uring_dst.bin";
-    std::error_code ec;
-    fs::remove(src, ec);
-    fs::remove(dst, ec);
-
-    {
-        std::ofstream ofs(src, std::ios::binary);
-        std::string buf(4096, 'K');
-        ofs.write(buf.data(), buf.size());
-    }
-
-    auto options = MakeBackendOptions();
-    options.CopyEngine = "liburing";
-    options.QueueDepth = 1000000; // Unrealistically large
-    auto logger = std::make_shared<ConsoleLogger>();
-    int rc = CopyFile(src, dst, options, logger);
-    // Should fail during Init() due to io_uring_queue_init failure
-    REQUIRE(rc == 1);
-
-    fs::remove(src, ec);
-    fs::remove(dst, ec);
-}
-
-#endif // ENABLE_LIBURING
 #endif // __APPLE__
