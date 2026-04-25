@@ -38,9 +38,8 @@ private:
 
     void DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset) override
     {
-        // GCD 不需要类似 libaio 的前置准备，所有数据在 Submit 时直接传递
-        (void)slot;
-        (void)fd;
+        // Save read parameters so SubmitBatchRead doesn't need to know rw vs cksum
+        slot->SetReadFd(fd);
         (void)buf;
         (void)ioSize;
         (void)offset;
@@ -62,9 +61,7 @@ private:
             auto ioInfo = slot->GetIOInfo();
             off_t offset = ioInfo.offset;
             size_t ioSize = ioInfo.io_size;
-            int fd = (slot->GetType() == "rw")
-                         ? slot->GetCPFPPtr()->GetSrcFd()
-                         : slot->GetCPFPPtr()->GetDstFd();
+            int fd = slot->GetReadFd();
             void *buf = slot->GetBuf();
 
             dispatch_group_async(mGroup, mQueue, ^{

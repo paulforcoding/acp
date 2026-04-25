@@ -327,6 +327,7 @@ public:
         mUserData = {};
         // clear IO tracking
         mIOInfo = IOInfo{};
+        mReadFd = -1;
     }
 
     char *GetBuf() const { return mBuf; }
@@ -381,6 +382,10 @@ public:
     void SetAssociatedSlot(IOSlot *slot) { mAssociatedSlot = slot; }
     IOSlot *GetAssociatedSlot() const { return mAssociatedSlot; }
 
+    // Read fd set by DoPrepareOneRead (used by GCD backend)
+    void SetReadFd(int fd) { mReadFd = fd; }
+    int GetReadFd() const { return mReadFd; }
+
 private:
     // data fields
     char *mBuf = nullptr;
@@ -390,6 +395,7 @@ private:
     std::shared_ptr<CPFilePair> mCPFPIt;
 
     IOInfo mIOInfo;
+    int mReadFd = -1;   // set by DoPrepareOneRead, consumed by GCD SubmitBatchRead
 
 #ifdef __linux__
     struct iocb mIocbRead;  // 读iocb
