@@ -92,11 +92,6 @@ TEST_CASE("IOSlotMgr CksumCopy match skip write", "[ioslotmgr]")
 
 TEST_CASE("IOSlotMgr CksumCopy mismatch do write", "[ioslotmgr]")
 {
-#ifdef __APPLE__
-    // Bug: GCDSlotMgr::SubmitBatchRead always uses GetSrcFd(), so cksum slot
-    // reads src instead of dst. This causes checksum to always match.
-    SKIP("Known bug on macOS: GCDSlotMgr uses wrong fd for cksum reads");
-#endif
 
     fs::path src = "/tmp/acp_ioslot_ckm_src.bin";
     fs::path dst = "/tmp/acp_ioslot_ckm_dst.bin";

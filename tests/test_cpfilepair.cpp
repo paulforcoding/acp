@@ -370,3 +370,137 @@ TEST_CASE("CPFilePair short read does not overestimate", "[cpfilepair]")
     fs::remove(src, ec);
     fs::remove(dst, ec);
 }
+
+TEST_CASE("CPFilePair preserve mode", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_preserve_mode_src.dat";
+    std::string dst = "tests/tmp_preserve_mode_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    fs::permissions(src, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, true, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto meta_res = p.PreserveMetadata();
+    REQUIRE(meta_res.has_value());
+
+    auto dst_perms = fs::status(dst, ec).permissions();
+    auto src_perms = fs::status(src, ec).permissions();
+    REQUIRE(dst_perms == src_perms);
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair preserve timestamps", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_preserve_time_src.dat";
+    std::string dst = "tests/tmp_preserve_time_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Set a specific mtime
+    auto old_time = fs::file_time_type::clock::now() - std::chrono::hours(24);
+    fs::last_write_time(src, old_time, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, true, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto meta_res = p.PreserveMetadata();
+    REQUIRE(meta_res.has_value());
+
+    auto src_mtime = fs::last_write_time(src, ec);
+    auto dst_mtime = fs::last_write_time(dst, ec);
+    // Convert to duration since epoch to avoid Catch2 stringize ambiguity on macOS
+    auto src_ms = std::chrono::duration_cast<std::chrono::milliseconds>(src_mtime.time_since_epoch()).count();
+    auto dst_ms = std::chrono::duration_cast<std::chrono::milliseconds>(dst_mtime.time_since_epoch()).count();
+    REQUIRE(src_ms == dst_ms);
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair compare mode mismatch", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_cmp_mode_src.dat";
+    std::string dst = "tests/tmp_cmp_mode_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Different permissions
+    fs::permissions(src, fs::perms::owner_all, ec);
+    fs::permissions(dst, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, true, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto cmp_res = p.CompareMetadata();
+    // CompareMetadata always returns success; mismatches are emitted as events
+    REQUIRE(cmp_res.has_value());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair compare timestamp mismatch", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_cmp_time_src.dat";
+    std::string dst = "tests/tmp_cmp_time_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Different mtimes
+    auto old_time = fs::file_time_type::clock::now() - std::chrono::hours(24);
+    fs::last_write_time(src, old_time, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, true, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto cmp_res = p.CompareMetadata();
+    REQUIRE(cmp_res.has_value());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}

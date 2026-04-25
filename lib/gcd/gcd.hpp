@@ -62,7 +62,9 @@ private:
             auto ioInfo = slot->GetIOInfo();
             off_t offset = ioInfo.offset;
             size_t ioSize = ioInfo.io_size;
-            int fd = slot->GetCPFPPtr()->GetSrcFd();
+            int fd = (slot->GetType() == "rw")
+                         ? slot->GetCPFPPtr()->GetSrcFd()
+                         : slot->GetCPFPPtr()->GetDstFd();
             void *buf = slot->GetBuf();
 
             dispatch_group_async(mGroup, mQueue, ^{
