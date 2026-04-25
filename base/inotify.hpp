@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <tl/expected.hpp>
 #include <memory>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -28,6 +29,7 @@ public:
             close(mFD);
             mFD = -1;
         }
+        mWdToPath.clear();
     }
     bool IsClosed() const { return mFD < 0; }
     tl::expected<void, StackError> Init()
@@ -47,6 +49,7 @@ public:
         {
             return tl::unexpected(StackError(fmt::format("inotify_add_watch failed for path {}", path)));
         }
+        mWdToPath[wd] = path;
         // begin recursive add
         for (const auto &entry : fs::recursive_directory_iterator(path))
         {
@@ -58,6 +61,7 @@ public:
                     return tl::unexpected(StackError(
                         fmt::format("inotify_add_watch failed for path {}", entry.path().string())));
                 }
+                mWdToPath[cwd] = entry.path().string();
             }
         }
         return {};
@@ -84,15 +88,33 @@ public:
             {
                 mLogger->debug("Inotify event: wd: {}, mask: {}, cookie: {}, len: {}, name: {}",
                                 event->wd, event->mask, event->cookie, event->len, event->name);
+
+                // Look up the watch descriptor to get the correct base path
+                auto it = mWdToPath.find(event->wd);
+                if (it == mWdToPath.end())
+                {
+                    mLogger->warn("Inotify event with unknown wd: {}, name: {}", event->wd, event->name);
+                    i += sizeof(struct inotify_event) + event->len;
+                    continue;
+                }
+                const std::string &watchPath = it->second;
+
                 std::string entry(event->name);
-                auto file_path = std::filesystem::canonical(fs::path(mRootPath) / entry);
+                std::error_code ec;
+                auto file_path = fs::weakly_canonical(fs::path(watchPath) / entry, ec);
+                if (ec)
+                {
+                    mLogger->warn("Inotify failed to resolve path: {}/{}, ec: {}", watchPath, entry, ec.message());
+                    i += sizeof(struct inotify_event) + event->len;
+                    continue;
+                }
                 mLogger->debug("Inotify detected file change: {}", file_path.string());
 
                 // 如果是目录，要添加到AddWatch中
                 if ((event->mask & IN_ISDIR) && (event->mask & IN_CREATE))
                 {
                     // 新建目录，添加watch
-                    auto add_watch_res = AddWatch(file_path);
+                    auto add_watch_res = AddWatch(file_path.string());
                     if (!add_watch_res)
                     {
                         mLogger->error("AddWatch failed for new directory {}", file_path.string());
@@ -111,4 +133,5 @@ private:
     std::string mRootPath;
     int mMask = IN_CLOSE_WRITE | IN_CREATE;
     std::shared_ptr<ILogger> mLogger;
+    std::map<int, std::string> mWdToPath;
 };

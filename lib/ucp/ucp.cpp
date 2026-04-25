@@ -5,6 +5,7 @@
 
 tl::expected<void, StackError> UIOSlotMgr::Init()
 {
+    // 当前 flags 为 0，未启用 IORING_SETUP_SQPOLL；如需内核线程轮询可在此传入对应 flags
     int ret = io_uring_queue_init(static_cast<int>(mRWSlots.size() + mCksumSlots.size()), &mRing, 0);
     if (ret < 0)
     {
@@ -15,6 +16,7 @@ tl::expected<void, StackError> UIOSlotMgr::Init()
 
 void UIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize, off_t offset)
 {
+    // 从 ring 的提交队列获取一个 sqe，绑定读参数与 slot 上下文；实际提交延迟到 SubmitBatchRead
     struct io_uring_sqe *sqe = io_uring_get_sqe(&mRing);
     io_uring_prep_read(sqe, fd, buf, ioSize, offset);
     io_uring_sqe_set_data(sqe, slot);
@@ -22,6 +24,7 @@ void UIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize
 
 void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
+    // 写准备与读对称：获取 sqe 后填充写参数，DirectIO 时同样按 IoSize 对齐写入
     struct io_uring_sqe *sqe = io_uring_get_sqe(&mRing);
     auto currCPFPIt = slot->GetCPFPPtr();
 
@@ -43,6 +46,7 @@ tl::expected<int, StackError> UIOSlotMgr::SubmitBatchRead(std::vector<IOSlot*> &
 {
     if (slots.empty()) return 0;
 
+    // io_uring 的批量提交只需一次 io_uring_submit，所有已填充的 sqe 会一次性刷入内核
 #ifndef NDEBUG
     auto start = std::chrono::high_resolution_clock::now();
     int ret = io_uring_submit(&mRing);
@@ -54,6 +58,7 @@ tl::expected<int, StackError> UIOSlotMgr::SubmitBatchRead(std::vector<IOSlot*> &
 
     if (ret < 0)
     {
+        // 与 libaio 一致，EAGAIN 表示 ring 满，需收割后再重试
         if (ret == -EAGAIN)
         {
             mLogger->warn("io_uring_submit() for read batch got EAGAIN, will try later.");
@@ -73,6 +78,7 @@ tl::expected<int, StackError> UIOSlotMgr::SubmitBatchWrite(std::vector<IOSlot*> 
 {
     if (slots.empty()) return 0;
 
+    // 写提交与读提交共用同一个 ring，io_uring_submit 会刷出所有 pending 的 sqe
 #ifndef NDEBUG
     auto start = std::chrono::high_resolution_clock::now();
     int ret = io_uring_submit(&mRing);
@@ -119,6 +125,8 @@ tl::expected<void, StackError> UIOSlotMgr::IOReap()
 {
     const int max_events = static_cast<int>(mRWSlots.size());
 
+    // 使用 io_uring_peek_cqe 非阻塞轮询，与 libaio 的 io_getevents 超时等待不同
+    // 若当前无完成事件则立即返回，由上层 RunQueue 循环控制调度节奏
     for (int i = 0; i < max_events; ++i)
     {
         mLogger->trace("Waiting for completion events to reap...");

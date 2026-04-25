@@ -290,6 +290,8 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
     return {};
 }
 
+// DoDstState: 在写入完成后对目标文件执行 fstat，更新 mDstStat 用于后续元数据比较。
+// 注意返回类型为 std::string 而非 StackError，是历史债务，不影响功能。
 tl::expected<void, std::string> CPFilePair::DoDstState()
 {
     if (fstat(mDstFd, &mDstStat) < 0)
@@ -301,6 +303,9 @@ tl::expected<void, std::string> CPFilePair::DoDstState()
     return {};
 }
 
+// GetNextReadIO: 从 FPChannel 取出下一个可读的文件对，初始化未就绪的文件。
+// 核心逻辑：Peek 队首 → 未初始化则 CheckAndInit → ENOTSUP 则跳过并报告 → 否则返回文件对指针。
+// 返回 nullptr 表示 Channel 已关闭且无更多工作。
 tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextReadIO()
 {
     while (true)
@@ -317,6 +322,7 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
             auto init_res = front->CheckAndInit();
             if (!init_res)
             {
+                // ENOTSUP 表示不支持的文件类型（如 FIFO），跳过而非失败，保持复制流程继续
                 if (init_res.error().Code() == ENOTSUP)
                 {
                     if (mReporter)
@@ -368,6 +374,8 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
     }
 }
 
+// CheckReadComplete: 检测指定文件对的读取是否全部完成。
+// 场景：IOSlotMgr 在 HandleReadCompletion 中调用，用于判断是否可以触发该文件的写入阶段。
 tl::expected<void, StackError> CPFilePairMgr::CheckReadComplete(std::shared_ptr<CPFilePair> pFP)
 {
     auto res = CheckReadCompleteNoLock(pFP);
@@ -378,6 +386,9 @@ tl::expected<void, StackError> CPFilePairMgr::CheckReadComplete(std::shared_ptr<
     return {};
 }
 
+// CheckReadCompleteNoLock: 无锁检查读取完成状态。
+// 设计意图：mReadBytes >= src_file_size 表示所有 block 已读完，可进入写入阶段。
+// 零字节文件或 SkipBlockCksum 文件在此处直接短路到 CheckWriteComplete，避免无意义的 IO 等待。
 tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP)
 {
     mLogger->trace("CheckReadCompleteNoLock(): src: {}, dst: {}, preparedReadBytes: {}, totalBytes: {}, IsReadFinished: {}",
@@ -405,6 +416,9 @@ tl::expected<bool, StackError> CPFilePairMgr::CheckReadCompleteNoLock(std::share
     return false;
 }
 
+// CheckWriteComplete: 检测指定文件对的写入是否全部完成。
+// 完成后的处理链：Truncate → DoDstState(fstat dst) → PreserveMetadata → fsync → 关闭 fd → FileComplete 报告。
+// 与 CheckReadComplete 不同，写入完成会触发副作用（元数据保留、资源释放、Reporter 事件）。
 tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr<CPFilePair> pFP)
 {
     assert(pFP != nullptr);
@@ -1037,6 +1051,9 @@ tl::expected<void, StackError> CPFilePair::CompareAcl([[maybe_unused]] const str
     return {};
 }
 
+// SkipWriteAsHole: 跳过全零块的写入，保持稀疏文件的洞结构（不实际写入零字节）。
+// 设计意图：当 IsAllZeros 检测到某 block 全为零时，不派发写 IO，而是直接更新 written bytes，
+// 最终通过 ftruncate 将目标文件扩展到正确大小，让文件系统按需分配块，对齐 cp --sparse=auto 行为。
 tl::expected<void, StackError> CPFilePair::SkipWriteAsHole(size_t bytes)
 {
     mHasHoles = true;

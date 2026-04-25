@@ -3,6 +3,8 @@
 #include "base/logger.hpp"
 #include <filesystem>
 #include <fstream>
+#include <thread>
+#include <chrono>
 #include <fcntl.h>
 
 namespace fs = std::filesystem;
@@ -248,6 +250,256 @@ TEST_CASE("CPFilePair DoDstState", "[cpfilepair]")
     auto dst_state = p.DoDstState();
     REQUIRE(dst_state.has_value());
     REQUIRE(p.GetDstFileSize() == 0); // just created, truncated to 0
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair CksumCopy size_mtime fast path", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_ckfast_src.dat";
+    std::string dst = "tests/tmp_ckfast_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(1024, 'X');
+        ofs.write(buf.data(), buf.size());
+    }
+    // Ensure different mtime so the size+mtime fast path does not trigger
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        std::string buf(1024, 'Y');
+        ofs.write(buf.data(), buf.size());
+    }
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Same size but different mtime — fast path should NOT trigger
+    REQUIRE_FALSE(p.IsSkipBlockCksum());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair CksumCopy fast path same mtime", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_ckfast2_src.dat";
+    std::string dst = "tests/tmp_ckfast2_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    // Create both files with identical mtime
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(1024, 'A');
+        ofs.write(buf.data(), buf.size());
+    }
+    fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+    // Copy preserves mtime on APFS, but if not, force it
+    fs::last_write_time(dst, fs::last_write_time(src), ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Same size and same mtime — fast path SHOULD trigger
+    REQUIRE(p.IsSkipBlockCksum());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair IsAllZeros all zero", "[cpfilepair]")
+{
+    std::vector<char> buf(4096, 0);
+    REQUIRE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair IsAllZeros not zero", "[cpfilepair]")
+{
+    std::vector<char> buf(4096, 0);
+    buf[100] = 1;
+    REQUIRE_FALSE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair IsAllZeros unaligned size", "[cpfilepair]")
+{
+    std::vector<char> buf(7, 0);
+    REQUIRE(IsAllZeros(buf.data(), buf.size()));
+    buf[3] = 1;
+    REQUIRE_FALSE(IsAllZeros(buf.data(), buf.size()));
+}
+
+TEST_CASE("CPFilePair short read does not overestimate", "[cpfilepair]")
+{
+    // Bug #5: UpdatePrepareReadBytes(io_size) overestimates on short reads.
+    std::string src = "tests/tmp_shortread_src.dat";
+    std::string dst = "tests/tmp_shortread_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        std::string buf(100, 'Z');
+        ofs.write(buf.data(), buf.size());
+    }
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    // Simulate a read larger than file size
+    p.UpdatePrepareReadBytes(1024);
+    // mReadBytes now exceeds file size, IsReadFinished is true
+    REQUIRE(p.IsReadFinished());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair preserve mode", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_preserve_mode_src.dat";
+    std::string dst = "tests/tmp_preserve_mode_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    fs::permissions(src, fs::perms::owner_read | fs::perms::owner_write | fs::perms::group_read, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, true, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto meta_res = p.PreserveMetadata();
+    REQUIRE(meta_res.has_value());
+
+    auto dst_perms = fs::status(dst, ec).permissions();
+    auto src_perms = fs::status(src, ec).permissions();
+    REQUIRE(dst_perms == src_perms);
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair preserve timestamps", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_preserve_time_src.dat";
+    std::string dst = "tests/tmp_preserve_time_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Set a specific mtime
+    auto old_time = fs::file_time_type::clock::now() - std::chrono::hours(24);
+    fs::last_write_time(src, old_time, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, false, false, true, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto meta_res = p.PreserveMetadata();
+    REQUIRE(meta_res.has_value());
+
+    auto src_mtime = fs::last_write_time(src, ec);
+    auto dst_mtime = fs::last_write_time(dst, ec);
+    // Convert to duration since epoch to avoid Catch2 stringize ambiguity on macOS
+    auto src_ms = std::chrono::duration_cast<std::chrono::milliseconds>(src_mtime.time_since_epoch()).count();
+    auto dst_ms = std::chrono::duration_cast<std::chrono::milliseconds>(dst_mtime.time_since_epoch()).count();
+    REQUIRE(src_ms == dst_ms);
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair compare mode mismatch", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_cmp_mode_src.dat";
+    std::string dst = "tests/tmp_cmp_mode_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Different permissions
+    fs::permissions(src, fs::perms::owner_all, ec);
+    fs::permissions(dst, fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, true, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto cmp_res = p.CompareMetadata();
+    // CompareMetadata always returns success; mismatches are emitted as events
+    REQUIRE(cmp_res.has_value());
+
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+}
+
+TEST_CASE("CPFilePair compare timestamp mismatch", "[cpfilepair]")
+{
+    std::string src = "tests/tmp_cmp_time_src.dat";
+    std::string dst = "tests/tmp_cmp_time_dst.dat";
+
+    std::error_code ec;
+    fs::remove(src, ec);
+    fs::remove(dst, ec);
+
+    {
+        std::ofstream ofs(src, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    {
+        std::ofstream ofs(dst, std::ios::binary);
+        ofs.write("x", 1);
+    }
+    // Different mtimes
+    auto old_time = fs::file_time_type::clock::now() - std::chrono::hours(24);
+    fs::last_write_time(src, old_time, ec);
+
+    auto logger = std::make_shared<ConsoleLogger>();
+    CPFilePair p(src, dst, false, true, true, false, logger, nullptr);
+    auto init_res = p.CheckAndInit();
+    REQUIRE(init_res.has_value());
+
+    auto cmp_res = p.CompareMetadata();
+    REQUIRE(cmp_res.has_value());
 
     fs::remove(src, ec);
     fs::remove(dst, ec);

@@ -108,7 +108,7 @@ int main(int argc, char *argv[])
         return 0;
     }
 
-    // ---------- CLI11 definition ----------
+    // ---------- CLI11 参数定义：所有选项先收集到 optional，后续按优先级覆盖配置 ----------
     CLI::App app{"acp — async cp, high-performance file copy"};
 
     std::optional<std::string> optLogLevel, optLogMode, optLogFile;
@@ -131,9 +131,12 @@ int main(int argc, char *argv[])
     app.add_option("--log-file", optLogFile, "Program log file path");
     app.add_option("--file-log-mode", optFileLogMode, "File log mode (console/file)");
     app.add_option("--file-log-path", optFileLogPath, "File log output path");
-    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)");
-    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)");
-    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)");
+    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)")
+        ->check(CLI::IsMember({"libaio", "liburing", "gcd"}));
+    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)")
+        ->check(CLI::IsMember({"CopyOnly", "CksumCopy", "CksumOnly"}));
+    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)")
+        ->check(CLI::IsMember({"xxhash64", "md5", "sha256"}));
 
     // Numeric options
     app.add_option("--file-log-interval", optFileLogInterval, "File log flush interval (sec)")->check(CLI::PositiveNumber);
@@ -167,10 +170,10 @@ int main(int argc, char *argv[])
 
     app.set_version_flag("--version,-v", kVersion);
 
-    // ---------- Load defaults (embedded in RWCombinedCopyOptions constructor) ----------
+    // ---------- 配置合并优先级：默认值 → /etc/acp_config.json → ~/acp_config.json → ./acp_config.json → CLI 参数 ----------
     RWCombinedCopyOptions options;
 
-    // ---------- Layered config file loading ----------
+    // 分层加载配置文件，后加载的覆盖先加载的
     auto merge = [&](const std::string& path) {
         auto merged = MergeCopyOptions(options, path);
         if (merged) options = *merged;
@@ -185,14 +188,14 @@ int main(int argc, char *argv[])
 
     merge("./acp_config.json");
 
-    // ---------- Parse command line ----------
+    // ---------- 解析命令行参数（CLI11），其值将在后续覆盖配置文件 ----------
     try {
         app.parse(argc, argv);
     } catch (const CLI::ParseError& e) {
         return app.exit(e);
     }
 
-    // ---------- Apply command-line overrides ----------
+    // ---------- 命令行参数覆盖配置文件（最高优先级） ----------
     if (optLogLevel)        options.ProgramLogLevel = *optLogLevel;
     if (optLogMode)         options.ProgramLogMode = *optLogMode;
     if (optLogFile)         options.ProgramLogFilePath = *optLogFile;
@@ -224,7 +227,7 @@ int main(int argc, char *argv[])
     if (enableSync)         options.SyncWrites = true;
     if (disableSync)        options.SyncWrites = false;
 
-    // ---------- Unified validation ----------
+    // ---------- 统一参数校验 ----------
     if (options.IoSize == 0) {
         std::cerr << "Configuration error: IOSize must be > 0\n";
         return 1;
@@ -246,7 +249,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // IOStuckTimeout and EnableInotify are mutually exclusive
+    // IOStuckTimeout 与 EnableInotify 互斥：inotify 模式下主循环永不退出，stuck 检测无意义
     if (options.EnableInotify && options.IOStuckTimeout > 0) {
         std::cerr << "Configuration error: IOStuckTimeout and EnableInotify are mutually exclusive.\n";
         return 1;
@@ -270,7 +273,7 @@ int main(int argc, char *argv[])
     std::vector<std::string> srcPaths(positional.begin(), positional.end() - 1);
     bool multiSource = srcPaths.size() > 1;
 
-    // Check all sources exist
+    // ---------- 路径校验层次 1：存在性 — 所有源路径必须存在 ----------
     for (const auto& src : srcPaths)
     {
         if (!fs::exists(src))
@@ -280,14 +283,13 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Multi-source mode: destination must be an existing directory
+    // 多源模式特殊处理：目标必须是已存在的目录，且禁用 inotify（无法同时监控多个源）
     if (multiSource && !fs::is_directory(dstPath))
     {
         std::cerr << "When copying multiple sources, destination must be an existing directory." << std::endl;
         return 1;
     }
 
-    // Disable inotify for multi-source mode
     if (multiSource && options.EnableInotify)
     {
         logger->warn("Inotify is disabled when copying multiple sources.");
@@ -312,9 +314,11 @@ int main(int argc, char *argv[])
             continue;
         }
 
+        // ---------- 路径校验层次 2：多源/单源下目的地构造逻辑 ----------
         fs::path dst_p;
         if (multiSource)
         {
+            // 多源时：以各源 basename 作为 dst 子目录/文件名（如 cp a b dir/ → dir/a, dir/b）
             try
             {
                 dst_p = fs::canonical(dstPath) / src_p.filename();
@@ -347,7 +351,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Check source and destination are not the same
+        // ---------- 路径校验层次 3：等价性 — 禁止源与目标是同一文件/目录 ----------
         if (fs::exists(dst_p))
         {
             try
@@ -365,7 +369,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Check destination is writable (only if it exists)
+        // ---------- 路径校验层次 4：可写性 — 已存在的目的地必须可写 ----------
         if (fs::exists(dst_p))
         {
             std::error_code ec;
@@ -381,7 +385,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Check src and dst are not subdirectory of each other when source is a directory
+        // ---------- 路径校验层次 5：子目录关系 — 禁止目录自复制导致无限递归 ----------
         if (fs::is_directory(src_p) && fs::is_directory(dst_p))
         {
             bool src_is_prefix_of_dst = std::mismatch(src_p.begin(), src_p.end(), dst_p.begin(), dst_p.end()).first == src_p.end();
@@ -397,7 +401,7 @@ int main(int argc, char *argv[])
             }
         }
 
-        // Dispatch copy
+        // ---------- 路由分发：根据源类型和目标类型选择 CopyDir / CopyFile / CopyBatch ----------
         bool dstIsDir = multiSource ? fs::is_directory(dstPath) : (fs::exists(dst_p) && fs::is_directory(dst_p));
 
         if (fs::is_directory(src_p) && dstIsDir)
@@ -451,6 +455,7 @@ int main(int argc, char *argv[])
         }
     }
 
+    // 多源模式下统一通过 CopyBatch 执行，避免为每个源单独创建 CopyEngine 线程组
     if (multiSource && !anyFailed && !batchPairs.empty())
     {
         int rc = CopyBatch(batchPairs, options, logger);

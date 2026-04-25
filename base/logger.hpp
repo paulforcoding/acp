@@ -49,7 +49,9 @@ inline const char *LevelToStr(Level lvl)
     return "unknown";
 }
 
-// JSON string escaping: handles ", \, \b, \f, \n, \r, \t
+// EscapeJsonString: 对 JSON 字符串中的控制字符进行安全转义。
+// 设计意图：NDJSON 日志直接输出到 stdout/文件，若消息内含未转义引号或换行会破坏解析器，
+// 因此必须在格式化阶段完成转义，而非依赖下游消费方处理。
 inline std::string EscapeJsonString(std::string_view s)
 {
     std::string result;
@@ -107,7 +109,9 @@ inline std::string CurrentIsoTimestamp()
     return oss.str();
 }
 
-// 通用 Logger 基类：提供级别管理和模板包装器。
+// ILogger: 模板方法模式——ShouldLog（级别过滤）与 Log（实际输出）分离。
+// 设计意图：高频日志路径下，先检查 enabled() 再决定是否格式化，避免无效的 fmt::format 开销。
+// 派生类仅需实现 log_impl()，即可获得带级别过滤的 trace/debug/info 等便捷接口。
 struct ILogger
 {
     virtual ~ILogger() = default;

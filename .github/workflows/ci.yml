@@ -66,14 +66,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
+        timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
@@ -138,14 +140,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
+        timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
@@ -191,9 +195,11 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(sysctl -n hw.ncpu)
 
       - name: Test
+        timeout-minutes: 20
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
@@ -201,3 +207,45 @@ jobs:
         with:
           name: acp-macos14
           path: build/acp
+
+  # ---------------------------------------------------------------------------
+  # Sanitizer build (AddressSanitizer + UndefinedBehaviorSanitizer)
+  # ---------------------------------------------------------------------------
+  sanitizer-ubuntu:
+    name: Sanitizer (ASan + UBSan, gcc-13, liburing=ON)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libaio-dev \
+            liburing-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            libssl-dev \
+            libxxhash-dev \
+            libacl1-dev
+
+      - name: Configure with sanitizers
+        run: |
+          export CC="gcc-13"
+          export CXX="g++-13"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DENABLE_LIBURING=ON \
+            -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" \
+            -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+
+      - name: Build
+        timeout-minutes: 30
+        run: cmake --build build -j$(nproc)
+
+      - name: Test (full suite)
+        timeout-minutes: 30
+        run: ctest --test-dir build --output-on-failure

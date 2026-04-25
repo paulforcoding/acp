@@ -92,6 +92,7 @@ std::optional<RWCombinedCopyOptions> MergeCopyOptions(
     }
 }
 
+// 初始化日志系统：根据配置选择文件日志或控制台日志，统一使用 spdlog 后端
 std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
 {
     std::shared_ptr<ILogger> myLogger;
@@ -123,8 +124,8 @@ std::shared_ptr<ILogger> InitLogger(const RWCombinedCopyOptions &options)
     }
 }
 
-// Scan a single source directory and push all entries into the shared channel.
-// Stats are accumulated into the caller-provided counters.
+// ScanDirIntoChannel: 显式栈式遍历单源目录，将文件/目录/符号链接推入共享 Channel
+// 使用栈而非递归：避免深层目录导致栈溢出，同时支持后序遍历（目录在子项处理完后再入队）
 static int ScanDirIntoChannel(const fs::path &src_p,
                               const fs::path &dst_p,
                               Channel<CopyEntry> &copyChannel,
@@ -243,6 +244,8 @@ static int ScanDirIntoChannel(const fs::path &src_p,
     return 0;
 }
 
+// CopyDir: 复制单个目录（含子树），支持 inotify/FSEvents 持续监控模式
+// 职责：创建 Channel → 启动 CopyEngine 线程 → 扫描源目录入队 → 可选进入 inotify 监听循环
 int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger, std::atomic<bool> *stopFlag)
 {
 #ifdef __APPLE__
@@ -252,7 +255,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         return 1;
     }
 #endif
-    // deal with inotify if enabled
+    // 若启用 inotify，先初始化监控器和事件读取线程，变更路径将通过独立 Channel 异步流入
     InotifyChannel iChan;
 #ifdef __APPLE__
     FSEventsWatcher inotifyWatcher(src_p.string(), logger);
@@ -285,7 +288,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
                 }
             });
     }
-    // 开始创建各种对象，注入依赖
+    // 构造核心对象并注入依赖：Channel 作为扫描线程与复制线程间的有界队列，FileLogReporter 用于结构化进度输出
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
     auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
@@ -293,7 +296,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
 
     std::atomic<bool> copyFailed{false};
 
-    // start a thread to run CopyEngine
+    // 启动 CopyEngine 工作线程：RunChannel 内部会再创建 CopyParallelism 个 I/O 线程
     std::thread file_copy_thread(
         [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
         {
@@ -305,7 +308,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
             }
         });
 
-    // create dst_dir if not exist
+    // 若目标目录不存在则提前创建，确保后续文件对可以直接写入
     if (!fs::exists(dst_p))
     {
         std::error_code ec;
@@ -317,8 +320,7 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
         }
     }
 
-    // recursively walk through source directory and prepare file pairs
-    // using post-order DFS with explicit stack (readdir + lstat, each path stat once)
+    // 使用显式栈进行后序 DFS 遍历：先处理子项，再处理目录本身；每个路径仅 lstat 一次
     size_t filesSeen = 0;
     size_t dirsSeen = 0;
     size_t symlinksSeen = 0;
@@ -408,6 +410,8 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     return 0;
 }
 
+// CopyFile: 复制单个文件，为单文件场景创建最小化的 Channel + CopyEngine 组合
+// 职责边界：仅处理单个文件/符号链接，不处理目录递归；调用方需保证路径已校验
 int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedCopyOptions &options, std::shared_ptr<ILogger> logger)
 {
 #ifdef __APPLE__
@@ -422,7 +426,7 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
-    // gather file info for copy_plan
+    // 预收集文件信息用于 CopyPlan 报告：单文件场景下总量固定，提前设置避免运行时统计
     size_t fileSize = 0;
     if (fs::exists(src_file) && fs::is_regular_file(src_file))
     {
@@ -478,6 +482,8 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
     return 0;
 }
 
+// CopyBatch: 多源批量复制，统一调度多个源目录/文件到单一 CopyEngine
+// 职责边界：合并多个源的扫描结果到同一 Channel，由单个 CopyEngine 完成全部复制；多源模式下禁用 inotify
 int CopyBatch(const std::vector<std::pair<fs::path, fs::path>> &srcDstPairs,
               const RWCombinedCopyOptions &options,
               std::shared_ptr<ILogger> logger)
@@ -516,10 +522,12 @@ int CopyBatch(const std::vector<std::pair<fs::path, fs::path>> &srcDstPairs,
     size_t filesUnsupported = 0;
     auto batchStart = std::chrono::steady_clock::now();
 
+    // 逐对处理：目录调用 ScanDirIntoChannel 入队，文件直接构造 CopyEntry 入队
     for (const auto &[src, dst] : srcDstPairs)
     {
         if (fs::is_directory(src))
         {
+            // 多源模式下目的地目录构造逻辑：每个源以其 basename 作为 dst 的子目录/文件名
             if (!fs::exists(dst))
             {
                 std::error_code ec;

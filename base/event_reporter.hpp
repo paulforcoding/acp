@@ -13,10 +13,11 @@
 
 #include "base/base.hpp"
 
-// FileLogReporter: 输出 file_info 事件（NDJSON）和状态快照。
-// 当 FileLogMode="console" 时，事件走 stdout，状态快照原子覆盖写入 stateFilePath。
-// 当 FileLogMode="file" 时，事件和状态快照都追加写入 fileLogPath（同一个文件）。
-// 所有统计使用原子变量，事件输出使用独立 mutex（不与 I/O 队列竞争）。
+// FileLogReporter: 双角色设计——既输出逐文件 NDJSON 事件流，也输出聚合状态快照。
+// NDJSON 格式选择原因：每行独立可解析，便于 Agent 流式消费和 grep 过滤。
+// console 模式：事件走 stdout（供外部管道消费），状态快照原子覆盖写入 stateFilePath（供监控探针读取）。
+// file 模式：事件与快照追加到同一文件，便于事后审计。
+// 所有统计使用原子变量，避免与 I/O 引擎竞争锁；事件输出使用独立 mutex 保证行级原子性。
 class FileLogReporter
 {
 public:
@@ -195,6 +196,7 @@ public:
     void IncrementFilesTotal(size_t n = 1) { mFilesTotal.fetch_add(n, std::memory_order_relaxed); }
     void IncrementFilesDone(size_t n = 1) { mFilesDone.fetch_add(n, std::memory_order_relaxed); }
     void AddBytesTotal(size_t n) { mBytesTotal.fetch_add(n, std::memory_order_relaxed); }
+    // 原子累加：多个工作线程并发完成 I/O 时无锁更新进度，避免成为扩展瓶颈
     void AddBytesDone(size_t n) { mBytesDone.fetch_add(n, std::memory_order_relaxed); }
 
     void SetCurrentFile(const std::string &path)

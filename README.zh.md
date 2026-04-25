@@ -317,6 +317,7 @@ main.cpp
 - **io_uring** 在 Linux 5.1+ 上通常优于 `libaio`，因为减少了系统调用开销。
 - **Direct I/O** 对大顺序工作负载有益。
 - 对高 IOPS 存储（NVMe SSD、RAID 阵列）增加 `QueueDepth` 和 `CopyParallelism`。
+- **不要将 `QueueDepth` 设置为过大的值**（例如数十万或更高）。在 Linux 上，过大的队列深度可能导致 `io_setup` 挂起或耗尽内核资源，而不是返回明确的错误。请保持在合理范围内（几十到几百）。
 - `CksumCopy` 会在目标端增加读而减少写，对某些读写性能差距较大的介质有很好的提速效果。size+mtime 快速路径可完全跳过未变更文件，消除这些文件的读放大。
 - **看门狗**（`IOStuckTimeout`）可防护不稳定存储或内核驱动 bug 导致的 I/O 挂起。设置为预期最大 I/O 延迟的数倍（如 `30` 秒）。在调试器下运行或 I/O 延迟故意波动的系统上，设为 `0` 关闭。
 
