@@ -66,14 +66,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
+        timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
@@ -138,14 +140,16 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
+        timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 10
+        timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
@@ -191,9 +195,11 @@ jobs:
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
+        timeout-minutes: 25
         run: cmake --build build -j$(sysctl -n hw.ncpu)
 
       - name: Test
+        timeout-minutes: 20
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload binary artifact
