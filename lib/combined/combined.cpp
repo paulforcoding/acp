@@ -173,12 +173,12 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             mReporter->FileError(mSrcPath, strerror(errno), errno, "failed");
         }
         return tl::unexpected(StackError(
-            fmt::format("open src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
+            fmt::format("open src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno)), errno));
     }
     if (fstat(mSrcFd, &mSrcStat) < 0)
     {
         return tl::unexpected(StackError(
-            fmt::format("fstat() src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno))));
+            fmt::format("fstat() src file failed: {}, errno: {}, errstr: {}", mSrcPath, errno, strerror(errno)), errno));
     }
     if (!S_ISREG(mSrcStat.st_mode))
     {
@@ -244,7 +244,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             mReporter->FileError(mSrcPath, strerror(errno), errno, "failed");
         }
         return tl::unexpected(StackError(
-            fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno))));
+            fmt::format("Failed to open/create destination file: {}, errno: {}, errstr: {}", mDstPath, errno, strerror(errno)), errno));
     }
 
     // Fast-path for CksumCopy: if dst exists with same size and mtime,
