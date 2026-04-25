@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cstring> // strerror
 #include <cerrno>
+#include <new> // std::align_val_t
 #include <tl/expected.hpp>
 #include "base/logger.hpp"
 
@@ -35,10 +36,13 @@ public:
 };
 
 template <typename T, typename = typename std::is_pointer<T>>
-void FreeBytes(T &p)
+void FreeBytes(T &p, size_t align = SECTORSIZE)
 {
-    delete[] p;
-    p = nullptr;
+    if (p)
+    {
+        ::operator delete[](p, std::align_val_t{align});
+        p = nullptr;
+    }
 }
 
 template <typename... Args>

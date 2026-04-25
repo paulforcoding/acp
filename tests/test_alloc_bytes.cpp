@@ -24,7 +24,7 @@ TEST_CASE("AllocBytes larger alignment")
     // Write to the full buffer to ensure it's actually allocated
     std::memset(p, 0xAB, kSize);
 
-    FreeBytes(p);
+    FreeBytes(p, kAlign);
     REQUIRE(p == nullptr);
 }
 
