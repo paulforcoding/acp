@@ -73,10 +73,30 @@ jobs:
         timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
+      - name: Upload test_run.log (unit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
+
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload test_run.log (integration)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
 
       - name: Upload binary artifact
         if: matrix.compiler == 'gcc' && matrix.liburing == 'ON'
@@ -147,10 +167,30 @@ jobs:
         timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
+      - name: Upload test_run.log (unit)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-centos9-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
+
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload test_run.log (integration)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-centos9-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
 
       - name: Upload binary artifact
         if: matrix.liburing == 'ON'
@@ -202,6 +242,16 @@ jobs:
         timeout-minutes: 20
         run: ctest --test-dir build --output-on-failure
 
+      - name: Upload test_run.log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-macos14-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
+
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -249,3 +299,13 @@ jobs:
       - name: Test (full suite)
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
+
+      - name: Upload test_run.log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-run-log-sanitizer-${{ github.run_id }}
+          path: |
+            test_run.log
+            build/test_run.log
+          if-no-files-found: ignore
