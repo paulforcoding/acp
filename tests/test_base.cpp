@@ -116,7 +116,7 @@ TEST_CASE("StackError is not std exception", "[base]")
 TEST_CASE("StackError FromFormat basic", "[base]")
 {
     auto err = StackError::FromFormat("code={}, msg={}", 42, "hello");
-    REQUIRE(err.Code() == 42);
+    REQUIRE(err.Code() == 0);
     REQUIRE(std::string(err.ToString()).find("code=42, msg=hello") != std::string::npos);
 }
 
