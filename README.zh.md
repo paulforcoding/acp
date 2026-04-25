@@ -263,10 +263,10 @@ rm -rf build                         # 完全清理
 首先检查文件大小和修改时间；若与目标端完全一致则直接跳过整个文件。否则读取源块并与对应目标块比较校验和 —— 仅写入差异块。适合大文件增量同步，其中大部分数据未变更。
 
 ### CksumOnly
-与 `CksumCopy` 相同的比较逻辑，但不写入。不匹配项以 CSV 格式记录到 `./cksum_result.log`：
+与 `CksumCopy` 相同的比较逻辑，但不写入。不匹配项以 NDJSON `cksum_result` 事件的形式通过 FileLog 系统输出。启用 `FileLog` 即可捕获：
 
-```
-/path/to/src,/path/to/dst,offset,MISMATCH
+```json
+{"type":"file_info","event":"cksum_result","src":"/path/to/src","dst":"/path/to/dst","result":"mismatch","reason":"checksum_mismatch","offset":1048576,"detail":"xxhash64","timestamp":"2026-04-25T12:34:56Z"}
 ```
 
 ## 测试

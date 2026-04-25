@@ -261,10 +261,10 @@ Standard async I/O copy. Best for initial replication.
 First checks file size and modification time; if both match the destination, the entire file is skipped. Otherwise reads source blocks and compares checksums with the corresponding destination blocks — only differing blocks are written. Useful for incremental sync of large files where most data is unchanged.
 
 ### CksumOnly
-Same comparison logic as `CksumCopy`, but never writes. Mismatches are logged to `./cksum_result.log` in CSV format:
+Same comparison logic as `CksumCopy`, but never writes. Mismatches are emitted as NDJSON `cksum_result` events through the FileLog system. Enable `FileLog` to capture them:
 
-```
-/path/to/src,/path/to/dst,offset,MISMATCH
+```json
+{"type":"file_info","event":"cksum_result","src":"/path/to/src","dst":"/path/to/dst","result":"mismatch","reason":"checksum_mismatch","offset":1048576,"detail":"xxhash64","timestamp":"2026-04-25T12:34:56Z"}
 ```
 
 ## Testing
