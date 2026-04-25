@@ -669,7 +669,8 @@ protected:
 
     tl::expected<int, StackError> SubmitReads()
     {
-        // TODO: change to batch submit later
+        std::vector<IOSlot *> batch;
+        batch.reserve(mOptions.Batch);
         int submitted = 0;
 
         for (auto &slot_up : mRWSlots)
@@ -711,25 +712,47 @@ protected:
                 }
             }
 
-            // submit prepared read io
+            // collect prepared read io into batch
             if (slot->GetStatus() == IOSlot::Status::ReadPrepared)
             {
-                auto res = SubmitOneRead(slot);
-                if (!res)
+                batch.push_back(slot);
+                if (static_cast<int>(batch.size()) >= mOptions.Batch)
                 {
-                    // if EAGAIN, break and try again later
-                    if (res.error().Code() == -EAGAIN)
+                    auto res = SubmitBatchRead(batch);
+                    if (!res)
                     {
-                        mLogger->debug("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
-                        PrtSlots();
-                        break;
+                        if (res.error().Code() == -EAGAIN)
+                        {
+                            mLogger->debug("SubmitBatchRead() got EAGAIN, will try later.");
+                            PrtSlots();
+                            break;
+                        }
+                        return tl::unexpected(res.error());
                     }
-                    return tl::unexpected(res.error());
+                    submitted += res.value();
+                    batch.clear();
+                }
+            }
+        }
+
+        // submit remaining slots in the final batch
+        if (!batch.empty())
+        {
+            auto res = SubmitBatchRead(batch);
+            if (!res)
+            {
+                if (res.error().Code() == -EAGAIN)
+                {
+                    mLogger->debug("SubmitBatchRead() final batch got EAGAIN, will try later.");
                 }
                 else
                 {
-                    submitted++;
+                    return tl::unexpected(res.error());
                 }
+            }
+            else
+            {
+                submitted += res.value();
             }
         }
 
@@ -737,33 +760,52 @@ protected:
     }
     tl::expected<int, StackError> SubmitWrites()
     {
-        // TODO: change to batch submit later
+        std::vector<IOSlot *> batch;
+        batch.reserve(mOptions.Batch);
         int submitted = 0;
 
-        // 找出所有可以提交写请求的slot并提交写请求
         for (auto &slot_up : mRWSlots)
         {
             auto slot = slot_up.get();
-            // prepare write io
             if (slot->GetStatus() == IOSlot::Status::WritePrepared)
             {
-
-                auto res = SubmitOneWrite(slot);
-                if (!res)
+                batch.push_back(slot);
+                if (static_cast<int>(batch.size()) >= mOptions.Batch)
                 {
-                    // if EAGAIN, break and try again later
-                    if (res.error().Code() == -EAGAIN)
+                    auto res = SubmitBatchWrite(batch);
+                    if (!res)
                     {
-                        mLogger->debug("SubmitOneWrite() in SubmitWrites() got EAGAIN, slot: {}, will try later.", slot->GetID());
-                        PrtSlots();
-                        break;
+                        if (res.error().Code() == -EAGAIN)
+                        {
+                            mLogger->debug("SubmitBatchWrite() got EAGAIN, will try later.");
+                            PrtSlots();
+                            break;
+                        }
+                        return tl::unexpected(res.error());
                     }
-                    return tl::unexpected(res.error());
+                    submitted += res.value();
+                    batch.clear();
+                }
+            }
+        }
+
+        if (!batch.empty())
+        {
+            auto res = SubmitBatchWrite(batch);
+            if (!res)
+            {
+                if (res.error().Code() == -EAGAIN)
+                {
+                    mLogger->debug("SubmitBatchWrite() final batch got EAGAIN, will try later.");
                 }
                 else
                 {
-                    submitted++;
+                    return tl::unexpected(res.error());
                 }
+            }
+            else
+            {
+                submitted += res.value();
             }
         }
         return submitted;
@@ -816,6 +858,10 @@ protected:
         {
             return submitted;
         }
+
+        std::vector<IOSlot *> batch;
+        batch.reserve(mOptions.Batch);
+
         for (auto &slot_up : mCksumSlots)
         {
             auto slot = slot_up.get();
@@ -836,25 +882,46 @@ protected:
                 PrepareOneRead(slot, cksum_read_offset, ioSlot->GetCPFPPtr());
             }
 
-            // submit prepared cksum read io
+            // collect prepared cksum read io into batch
             if (slot->GetStatus() == IOSlot::Status::ReadPrepared)
             {
-                auto res = SubmitOneRead(slot);
-                if (!res)
+                batch.push_back(slot);
+                if (static_cast<int>(batch.size()) >= mOptions.Batch)
                 {
-                    // if EAGAIN, break and try again later
-                    if (res.error().Code() == -EAGAIN)
+                    auto res = SubmitBatchRead(batch);
+                    if (!res)
                     {
-                        mLogger->debug("io_submit() for cksum read got EAGAIN, slot: {}, will try later.", slot->GetID());
-                        PrtSlots();
-                        break;
+                        if (res.error().Code() == -EAGAIN)
+                        {
+                            mLogger->debug("SubmitBatchRead() for cksum got EAGAIN, will try later.");
+                            PrtSlots();
+                            break;
+                        }
+                        return tl::unexpected(res.error());
                     }
-                    return tl::unexpected(res.error());
+                    submitted += res.value();
+                    batch.clear();
+                }
+            }
+        }
+
+        if (!batch.empty())
+        {
+            auto res = SubmitBatchRead(batch);
+            if (!res)
+            {
+                if (res.error().Code() == -EAGAIN)
+                {
+                    mLogger->debug("SubmitBatchRead() for cksum final batch got EAGAIN, will try later.");
                 }
                 else
                 {
-                    submitted++;
+                    return tl::unexpected(res.error());
                 }
+            }
+            else
+            {
+                submitted += res.value();
             }
         }
         return submitted;
@@ -1194,8 +1261,8 @@ private:
     virtual tl::expected<void, StackError> Init() = 0;
     virtual void DoPrepareOneRead(SlotType *slot, int fd, void *buf, size_t ioSize, off_t offset) = 0;
     virtual void PrepareOneWrite(SlotType *slot) = 0;
-    virtual tl::expected<void, StackError> SubmitOneRead(SlotType *slot) = 0;
-    virtual tl::expected<void, StackError> SubmitOneWrite(SlotType *slot) = 0;
+    virtual tl::expected<int, StackError> SubmitBatchRead(std::vector<SlotType*> &slots) = 0;
+    virtual tl::expected<int, StackError> SubmitBatchWrite(std::vector<SlotType*> &slots) = 0;
     virtual tl::expected<void, StackError> IOReap() = 0;
 
 protected:

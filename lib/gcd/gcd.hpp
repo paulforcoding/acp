@@ -55,42 +55,48 @@ private:
         slot->SetStatus(IOSlot::Status::WritePrepared);
     }
 
-    tl::expected<void, StackError> SubmitOneRead(IOSlot *slot) override
+    tl::expected<int, StackError> SubmitBatchRead(std::vector<IOSlot*> &slots) override
     {
-        auto ioInfo = slot->GetIOInfo();
-        off_t offset = ioInfo.offset;
-        size_t ioSize = ioInfo.io_size;
-        int fd = slot->GetCPFPPtr()->GetSrcFd();
-        void *buf = slot->GetBuf();
+        for (auto *slot : slots)
+        {
+            auto ioInfo = slot->GetIOInfo();
+            off_t offset = ioInfo.offset;
+            size_t ioSize = ioInfo.io_size;
+            int fd = slot->GetCPFPPtr()->GetSrcFd();
+            void *buf = slot->GetBuf();
 
-        dispatch_group_async(mGroup, mQueue, ^{
-            ssize_t ret = pread(fd, buf, ioSize, offset);
-            if (ret < 0)
-                ret = -errno;
-            EnqueueCompletion(slot, ret, true);
-        });
+            dispatch_group_async(mGroup, mQueue, ^{
+                ssize_t ret = pread(fd, buf, ioSize, offset);
+                if (ret < 0)
+                    ret = -errno;
+                EnqueueCompletion(slot, ret, true);
+            });
 
-        slot->SetStatus(IOSlot::Status::ReadSubmitted);
-        return {};
+            slot->SetStatus(IOSlot::Status::ReadSubmitted);
+        }
+        return static_cast<int>(slots.size());
     }
 
-    tl::expected<void, StackError> SubmitOneWrite(IOSlot *slot) override
+    tl::expected<int, StackError> SubmitBatchWrite(std::vector<IOSlot*> &slots) override
     {
-        auto ioInfo = slot->GetIOInfo();
-        off_t offset = ioInfo.offset;
-        size_t ioSize = ioInfo.io_size;
-        int fd = slot->GetCPFPPtr()->GetDstFd();
-        void *buf = slot->GetBuf();
+        for (auto *slot : slots)
+        {
+            auto ioInfo = slot->GetIOInfo();
+            off_t offset = ioInfo.offset;
+            size_t ioSize = ioInfo.io_size;
+            int fd = slot->GetCPFPPtr()->GetDstFd();
+            void *buf = slot->GetBuf();
 
-        dispatch_group_async(mGroup, mQueue, ^{
-            ssize_t ret = pwrite(fd, buf, ioSize, offset);
-            if (ret < 0)
-                ret = -errno;
-            EnqueueCompletion(slot, ret, false);
-        });
+            dispatch_group_async(mGroup, mQueue, ^{
+                ssize_t ret = pwrite(fd, buf, ioSize, offset);
+                if (ret < 0)
+                    ret = -errno;
+                EnqueueCompletion(slot, ret, false);
+            });
 
-        slot->SetStatus(IOSlot::Status::WriteSubmitted);
-        return {};
+            slot->SetStatus(IOSlot::Status::WriteSubmitted);
+        }
+        return static_cast<int>(slots.size());
     }
 
     tl::expected<void, StackError> IOReap() override

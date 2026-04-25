@@ -26,44 +26,6 @@ void AIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize
 
     return;
 }
-tl::expected<void, StackError> AIOSlotMgr::SubmitOneRead(IOSlot *slot)
-{
-    // m_logger->debug("Submitting read IO for slot ID: {}", slot->GetID());
-
-    auto iocb = slot->GetReadIOCB();
-    assert(iocb != nullptr);
-
-    struct iocb *iocbs[1];
-    iocbs[0] = iocb;
-
-#ifndef NDEBUG
-    // 打印io_submit()所用时间
-    auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_submit(mIoCtx, 1, iocbs);
-    auto end = std::chrono::high_resolution_clock::now();
-    AddDuration("io_submit(read)", start, end);
-#else
-    int ret = io_submit(mIoCtx, 1, iocbs);
-#endif
-    if (ret < 0)
-    {
-        if (ret == -EAGAIN) // cannot submit more IO now
-        {
-            mLogger->warn("io_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
-            // PrtSlots();
-            return tl::unexpected(StackError::FromErrno(-EAGAIN));
-        }
-
-        return tl::unexpected(StackError(
-            fmt::format("io_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
-    }
-    else
-    {
-        slot->SetStatus(IOSlot::Status::ReadSubmitted);
-    }
-    return {};
-}
-
 void AIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
     auto iocb{slot->InitWriteIOCB()};
@@ -85,47 +47,80 @@ void AIOSlotMgr::PrepareOneWrite(IOSlot *slot)
     return;
 }
 
-tl::expected<void, StackError> AIOSlotMgr::SubmitOneWrite(IOSlot *slot)
+tl::expected<int, StackError> AIOSlotMgr::SubmitBatchRead(std::vector<IOSlot *> &slots)
 {
-    assert(slot->GetStatus() == IOSlot::Status::WritePrepared);
-    auto iocb = slot->GetWriteIOCB();
-    assert(iocb != nullptr);
+    if (slots.empty()) return 0;
 
-    struct iocb *iocbs[1];
-    iocbs[0] = iocb;
-
-    mLogger->debug("Submitting write IO for slot ID: {}, offset: {}, io_size: {}, src: {}, dst: {}",
-                   slot->GetID(), iocb->u.c.offset, iocb->u.c.nbytes,
-                   slot->GetCPFPPtr()->GetSrcPath(), slot->GetCPFPPtr()->GetDstPath());
+    std::vector<struct iocb *> iocbs;
+    iocbs.reserve(slots.size());
+    for (auto *slot : slots)
+    {
+        iocbs.push_back(slot->GetReadIOCB());
+    }
 
 #ifndef NDEBUG
-    // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_submit(mIoCtx, 1, iocbs);
+    int ret = io_submit(mIoCtx, static_cast<int>(iocbs.size()), iocbs.data());
     auto end = std::chrono::high_resolution_clock::now();
-    AddDuration("io_submit(write)", start, end); // warn if >100ms
+    AddDuration("io_submit(read)", start, end);
 #else
-    int ret = io_submit(mIoCtx, 1, iocbs);
+    int ret = io_submit(mIoCtx, static_cast<int>(iocbs.size()), iocbs.data());
 #endif
+
     if (ret < 0)
     {
-        // EAGAIN happens here
         if (ret == -EAGAIN)
         {
-            mLogger->warn("io_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_submit() for read batch got EAGAIN, will try later.");
             return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
-
         return tl::unexpected(StackError(
             fmt::format("io_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }
-    else
+
+    for (int i = 0; i < ret; ++i)
     {
-        slot->SetStatus(IOSlot::Status::WriteSubmitted);
-        return {};
+        slots[i]->SetStatus(IOSlot::Status::ReadSubmitted);
+    }
+    return ret;
+}
+
+tl::expected<int, StackError> AIOSlotMgr::SubmitBatchWrite(std::vector<IOSlot *> &slots)
+{
+    if (slots.empty()) return 0;
+
+    std::vector<struct iocb *> iocbs;
+    iocbs.reserve(slots.size());
+    for (auto *slot : slots)
+    {
+        iocbs.push_back(slot->GetWriteIOCB());
     }
 
-    return {};
+#ifndef NDEBUG
+    auto start = std::chrono::high_resolution_clock::now();
+    int ret = io_submit(mIoCtx, static_cast<int>(iocbs.size()), iocbs.data());
+    auto end = std::chrono::high_resolution_clock::now();
+    AddDuration("io_submit(write)", start, end);
+#else
+    int ret = io_submit(mIoCtx, static_cast<int>(iocbs.size()), iocbs.data());
+#endif
+
+    if (ret < 0)
+    {
+        if (ret == -EAGAIN)
+        {
+            mLogger->warn("io_submit() for write batch got EAGAIN, will try later.");
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
+        }
+        return tl::unexpected(StackError(
+            fmt::format("io_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
+    }
+
+    for (int i = 0; i < ret; ++i)
+    {
+        slots[i]->SetStatus(IOSlot::Status::WriteSubmitted);
+    }
+    return ret;
 }
 
 // reap read IO and submit write IO with current IOSlot's buffer

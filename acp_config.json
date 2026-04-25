@@ -3,6 +3,7 @@
   "ProgramLogMode": "file",
   "ProgramLogFilePath": "/tmp/acp_program.log",
   "FileLogEnabled": true,
+  "FileLogMode": "file",
   "FileLogIntervalSec": 5,
   "FileLogPath": "/tmp/acp_file_info.json",
   "CopyEngine": "libaio",

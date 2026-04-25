@@ -20,31 +20,6 @@ void UIOSlotMgr::DoPrepareOneRead(IOSlot *slot, int fd, void *buf, size_t ioSize
     io_uring_sqe_set_data(sqe, slot);
 }
 
-tl::expected<void, StackError> UIOSlotMgr::SubmitOneRead(IOSlot *slot)
-{
-#ifndef NDEBUG
-    // 打印io_submit()所用时间
-    auto start = std::chrono::high_resolution_clock::now();
-    int ret = io_uring_submit(&mRing);
-    auto end = std::chrono::high_resolution_clock::now();
-    AddDuration("io_submit(read)", start, end);
-#else
-    int ret = io_uring_submit(&mRing);
-#endif
-
-    if (ret < 0)
-    {
-        if (ret == -EAGAIN)
-        {
-            mLogger->warn("io_uring_submit() for read got EAGAIN, slot: {}, will try later.", slot->GetID());
-            return tl::unexpected(StackError::FromErrno(-EAGAIN));
-        }
-        return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
-    }
-    slot->SetStatus(IOSlot::Status::ReadSubmitted);
-    return {};
-}
-
 void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
 {
     struct io_uring_sqe *sqe = io_uring_get_sqe(&mRing);
@@ -64,14 +39,15 @@ void UIOSlotMgr::PrepareOneWrite(IOSlot *slot)
     slot->SetStatus(IOSlot::Status::WritePrepared);
 }
 
-tl::expected<void, StackError> UIOSlotMgr::SubmitOneWrite(IOSlot *slot)
+tl::expected<int, StackError> UIOSlotMgr::SubmitBatchRead(std::vector<IOSlot*> &slots)
 {
+    if (slots.empty()) return 0;
+
 #ifndef NDEBUG
-    // 打印io_submit()所用时间
     auto start = std::chrono::high_resolution_clock::now();
     int ret = io_uring_submit(&mRing);
     auto end = std::chrono::high_resolution_clock::now();
-    AddDuration("io_submit(write)", start, end);
+    AddDuration("io_uring_submit(read)", start, end);
 #else
     int ret = io_uring_submit(&mRing);
 #endif
@@ -80,14 +56,47 @@ tl::expected<void, StackError> UIOSlotMgr::SubmitOneWrite(IOSlot *slot)
     {
         if (ret == -EAGAIN)
         {
-            mLogger->warn("io_uring_submit() for write got EAGAIN, slot: {}, will try later.", slot->GetID());
+            mLogger->warn("io_uring_submit() for read batch got EAGAIN, will try later.");
             return tl::unexpected(StackError::FromErrno(-EAGAIN));
         }
         return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
     }
-    slot->SetStatus(IOSlot::Status::WriteSubmitted);
 
-    return {};
+    for (auto *slot : slots)
+    {
+        slot->SetStatus(IOSlot::Status::ReadSubmitted);
+    }
+    return static_cast<int>(slots.size());
+}
+
+tl::expected<int, StackError> UIOSlotMgr::SubmitBatchWrite(std::vector<IOSlot*> &slots)
+{
+    if (slots.empty()) return 0;
+
+#ifndef NDEBUG
+    auto start = std::chrono::high_resolution_clock::now();
+    int ret = io_uring_submit(&mRing);
+    auto end = std::chrono::high_resolution_clock::now();
+    AddDuration("io_uring_submit(write)", start, end);
+#else
+    int ret = io_uring_submit(&mRing);
+#endif
+
+    if (ret < 0)
+    {
+        if (ret == -EAGAIN)
+        {
+            mLogger->warn("io_uring_submit() for write batch got EAGAIN, will try later.");
+            return tl::unexpected(StackError::FromErrno(-EAGAIN));
+        }
+        return tl::unexpected(StackError(fmt::format("io_uring_submit() failed, errno: {}, errstr: {}", -ret, strerror(-ret))));
+    }
+
+    for (auto *slot : slots)
+    {
+        slot->SetStatus(IOSlot::Status::WriteSubmitted);
+    }
+    return static_cast<int>(slots.size());
 }
 
 tl::expected<void, StackError> UIOSlotMgr::ReapRead(IOSlot *slot, io_uring_cqe *cqe)
