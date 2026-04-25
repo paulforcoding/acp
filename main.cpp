@@ -405,9 +405,9 @@ int main(int argc, char *argv[])
         // ---------- 路由分发：根据源类型和目标类型选择 CopyDir / CopyFile / CopyBatch ----------
         bool dstIsDir = multiSource ? fs::is_directory(dstPath) : (fs::exists(dst_p) && fs::is_directory(dst_p));
 
-        if (fs::is_directory(src_p) && dstIsDir)
+        if (fs::is_directory(src_p) && (dstIsDir || !fs::exists(dst_p)))
         {
-            fs::path final_dst = multiSource ? dst_p : dst_p / src_p.filename();
+            fs::path final_dst = multiSource ? dst_p : (dstIsDir ? dst_p / src_p.filename() : dst_p);
             if (multiSource)
             {
                 batchPairs.emplace_back(src_p, final_dst);
