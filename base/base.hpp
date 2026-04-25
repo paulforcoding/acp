@@ -128,7 +128,7 @@ class FuncDurationStat
 {
 public:
     FuncDurationStat(std::shared_ptr<ILogger> logger) : mLogger(logger) {}
-    // duration in ms
+    // duration in microseconds
     void AddDuration(std::string_view func_name, int64_t duration)
     {
         std::lock_guard<std::mutex> lock(mMutex);
@@ -168,7 +168,7 @@ public:
                 }
             }
             double avg_duration = static_cast<double>(total) / durations.size();
-            mLogger->info("Function: {}, Count: {}, Avg: {:.2f} ms, Min: {} ms, Max: {} ms",
+            mLogger->info("Function: {}, Count: {}, Avg: {:.2f} us, Min: {} us, Max: {} us",
                           func_name, durations.size(), avg_duration, min_duration, max_duration);
         }
     }
