@@ -129,33 +129,6 @@ TEST_CASE("Backend DirectIO unaligned size", "[backend]")
 
 #else // Linux
 
-TEST_CASE("AIOSlotMgr io_setup failure", "[backend][libaio]")
-{
-    // QueueDepth too large should cause io_setup to fail
-    fs::path src = "/tmp/acp_backend_aio_src.bin";
-    fs::path dst = "/tmp/acp_backend_aio_dst.bin";
-    std::error_code ec;
-    fs::remove(src, ec);
-    fs::remove(dst, ec);
-
-    {
-        std::ofstream ofs(src, std::ios::binary);
-        std::string buf(4096, 'J');
-        ofs.write(buf.data(), buf.size());
-    }
-
-    auto options = MakeBackendOptions();
-    options.CopyEngine = "libaio";
-    options.QueueDepth = 1000000; // Unrealistically large
-    auto logger = std::make_shared<ConsoleLogger>();
-    int rc = CopyFile(src, dst, options, logger);
-    // Should fail during Init() due to io_setup failure
-    REQUIRE(rc == 1);
-
-    fs::remove(src, ec);
-    fs::remove(dst, ec);
-}
-
 TEST_CASE("Backend DirectIO unaligned size", "[backend]")
 {
     fs::path src = "/tmp/acp_backend_dio_src.bin";

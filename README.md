@@ -315,6 +315,7 @@ main.cpp
 - **io_uring** generally outperforms `libaio` on Linux 5.1+ due to reduced syscall overhead.
 - **Direct I/O** is beneficial for large sequential workloads but requires sector-aligned I/O sizes.
 - Increase `QueueDepth` and `CopyParallelism` for high-IOPS storage (NVMe SSDs, RAID arrays).
+- **Do NOT set `QueueDepth` to an excessively large value** (e.g., hundreds of thousands or more). On Linux, overly large queue depths can cause `io_setup` to hang or exhaust kernel resources instead of returning a clean error. Stay within reasonable bounds (tens to low hundreds).
 - `CksumCopy` adds read amplification on the destination side; use when write bandwidth is the bottleneck. The size+mtime fast-path skips unchanged files entirely, eliminating read amplification for files that have not changed.
 - **Watchdog** (`IOStuckTimeout`) protects against hung I/O on flaky storage or kernel driver bugs. Set to a value well above your expected max I/O latency (e.g., `30` for seconds). Disable with `0` when running under debuggers or on systems with intentionally variable I/O latency.
 
