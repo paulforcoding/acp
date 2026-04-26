@@ -332,9 +332,11 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     size_t filesUnsupported = 0;
     auto scanStart = std::chrono::steady_clock::now();
 
+    logger->warn("CopyDir: ScanDirIntoChannel starting, src={}", src_p.string());
     int scanRc = ScanDirIntoChannel(src_p, dst_p, copyChannel, reporter.get(), logger,
                                     filesSeen, dirsSeen, symlinksSeen,
                                     bytesSeen, filesRegular, filesUnsupported);
+    logger->warn("CopyDir: ScanDirIntoChannel done, scanRc={}, filesSeen={}, dirsSeen={}", scanRc, filesSeen, dirsSeen);
     if (scanRc != 0)
     {
         copyChannel.Close();
