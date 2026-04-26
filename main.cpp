@@ -129,9 +129,48 @@ static void PrintHelp(const char* /*program_name*/)
         "## 日志\n"
         "\n"
         "- **ProgramLog**：程序运行状态日志，可设为 console 或 file\n"
-        "- **FileLog**：文件复制/校验结果日志，可设为 console 或 file。CksumOnly / CksumCopy 模式自动启用。\n"
+        "- **FileLog**：文件复制/校验结果日志，NDJSON 格式（每行一个 JSON 对象），可设为 console 或 file。\n"
+        "  CksumOnly / CksumCopy 模式自动启用；CopyOnly 模式需手动启用（`--enable-file-log`）。\n"
         "\n"
-        "使用 `acp --help-all` 查看完整的功能场景、日志系统和使用场景说明。\n"
+        "### FileLog 使用方法\n"
+        "\n"
+        "```bash\n"
+        "# CopyOnly 模式启用 FileLog 并输出到文件\n"
+        "acp --enable-file-log --file-log-mode=file --file-log-path=/tmp/acp_file.jsonl /data/ /backup/\n"
+        "\n"
+        "# 实时查看复制进度（file 模式）\n"
+        "tail -f /tmp/acp_file.jsonl | jq 'select(.event==\"progress_summary\") | {files_done, bytes_done, speed_mbps_avg, eta_seconds}'\n"
+        "\n"
+        "# 实时查看复制进度（console 模式）\n"
+        "acp --enable-file-log --file-log-mode=console /data/ /backup/ 2>/dev/null | jq 'select(.event==\"progress_summary\")'\n"
+        "\n"
+        "# 查看校验结果（CksumOnly / CksumCopy 模式）\n"
+        "cat /tmp/acp_file.jsonl | jq 'select(.event==\"cksum_result\")'\n"
+        "\n"
+        "# 检查是否有错误\n"
+        "cat /tmp/acp_file.jsonl | jq 'select(.event==\"file_error\")'\n"
+        "\n"
+        "# 查看最终汇总\n"
+        "cat /tmp/acp_file.jsonl | jq 'select(.event==\"copy_complete\")'\n"
+        "```\n"
+        "\n"
+        "### FileLog 事件类型\n"
+        "\n"
+        "| 事件 | 说明 | 出现时机 |\n"
+        "|------|------|----------|\n"
+        "| `copy_plan` | 扫描结果汇总 | 复制开始前 |\n"
+        "| `file_start` | 文件开始复制 | 每个文件 |\n"
+        "| `file_complete` | 文件复制完成 | 每个文件 |\n"
+        "| `file_error` | 文件复制错误 | 出错时 |\n"
+        "| `file_unsupported` | 不支持的文件类型 | 跳过时 |\n"
+        "| `meta_warning` | 元数据保留警告 | 保留失败时 |\n"
+        "| `cksum_result` | 校验结果 | CksumOnly / CksumCopy 模式 |\n"
+        "| `progress_summary` | 进度摘要 | 每 intervalSec 秒 |\n"
+        "| `state_snapshot` | 状态快照 | 每 intervalSec 秒 |\n"
+        "| `copy_complete` | 复制完成汇总 | 复制结束时 |\n"
+        "| `stuck_detected` | I/O 卡住检测 | I/O 超时时 |\n"
+        "\n"
+        "各事件的完整字段说明见 `acp --help-all`。\n"
         "\n"
         "## 配置加载顺序（后者覆盖前者）\n"
         "\n"
@@ -242,9 +281,170 @@ acp 有两套日志系统：
 
 ---
 
-## 3. 使用场景与配置示例
+## 3. FileLog NDJSON 事件格式
 
-### 3.1 个人日常使用
+FileLog 输出 NDJSON 格式（每行一个 JSON 对象），每行包含 `"type":"file_info"` 和 `"event"` 字段。
+所有事件均包含 `"timestamp"` 字段（ISO 8601 格式）。
+
+### 3.1 copy_plan — 扫描结果汇总
+
+复制开始前发出，报告源路径扫描结果。
+
+```json
+{"type":"file_info","event":"copy_plan","scan_state":"completed","files_total":30,"dirs_total":1,"symlinks_total":0,"bytes_total":314572800,"files_regular":30,"files_unsupported":0,"timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| scan_state | string | `"completed"` |
+| files_total | int | 源端文件总数 |
+| dirs_total | int | 源端目录总数 |
+| symlinks_total | int | 源端符号链接总数 |
+| bytes_total | int | 源端文件总字节数 |
+| files_regular | int | 普通文件数 |
+| files_unsupported | int | 不支持的文件类型数 |
+
+### 3.2 file_start — 文件开始复制
+
+```json
+{"type":"file_info","event":"file_start","src":"/data/a.txt","dst":"/backup/a.txt","size":10485760,"timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| src | string | 源文件路径 |
+| dst | string | 目标文件路径 |
+| size | int | 文件大小（字节） |
+
+### 3.3 file_complete — 文件复制完成
+
+```json
+{"type":"file_info","event":"file_complete","src":"/data/a.txt","dst":"/backup/a.txt","size":10485760,"bytes_written":10485760,"duration_ms":3,"speed_mbps":3333.3,"timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| src | string | 源文件路径 |
+| dst | string | 目标文件路径 |
+| size | int | 文件大小（字节） |
+| bytes_written | int | 实际写入字节数 |
+| duration_ms | int | 复制耗时（毫秒） |
+| speed_mbps | float | 单文件平均速度（MB/s） |
+
+### 3.4 file_error — 文件复制错误
+
+```json
+{"type":"file_info","event":"file_error","src":"/data/a.txt","error":"Permission denied","errno":13,"action":"open","timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| src | string | 源文件路径 |
+| error | string | 错误描述 |
+| errno | int | errno 值 |
+| action | string | 出错操作（`open`/`read`/`write`/`truncate`/...） |
+
+### 3.5 file_unsupported — 不支持的文件类型
+
+```json
+{"type":"file_info","event":"file_unsupported","src":"/dev/sda1","type":"block_device","action":"skip","timestamp":"..."}
+```
+
+### 3.6 meta_warning — 元数据保留警告
+
+```json
+{"type":"file_info","event":"meta_warning","src":"/data/a.txt","meta_type":"xattr","error":"Operation not supported","errno":95,"timestamp":"..."}
+```
+
+### 3.7 cksum_result — 校验结果（CksumOnly / CksumCopy）
+
+```json
+{"type":"file_info","event":"cksum_result","src":"/data/a.txt","dst":"/backup/a.txt","result":"match","content":"match","meta":"mismatch","meta_details":["mtime","uid"],"timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| src | string | 源文件路径 |
+| dst | string | 目标文件路径 |
+| result | string | 总体结果：`"match"` 或 `"mismatch"` |
+| content | string | 内容校验结果：`"match"` / `"mismatch"` / `"skipped"` |
+| meta | string | 元数据校验结果：`"match"` / `"mismatch"` |
+| meta_details | array | 差异元数据项列表，如 `["mtime","uid","mode"]` |
+
+### 3.8 progress_summary — 进度摘要
+
+每 `FileLogIntervalSec` 秒发出一次。
+
+```json
+{"type":"file_info","event":"progress_summary","files_total":30,"files_done":10,"bytes_total":314572800,"bytes_done":104857600,"speed_mbps_avg":1250.0,"eta_seconds":168,"current_file":"/data/medium_11.bin","timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| files_total | int | 文件总数 |
+| files_done | int | 已完成文件数 |
+| bytes_total | int | 总字节数 |
+| bytes_done | int | 已完成字节数 |
+| speed_mbps_avg | float | 全局平均速度（MB/s） |
+| eta_seconds | int | 预计剩余时间（秒），0 表示无法估算 |
+| current_file | string | 当前正在复制的文件路径 |
+
+### 3.9 state_snapshot — 状态快照
+
+每 `FileLogIntervalSec` 秒发出一次。file 模式追加到日志文件；console 模式原子覆盖写入状态文件。
+
+```json
+{"type":"file_info","event":"state_snapshot","pid":12345,"state":"running","start_time":"2026-04-26T04:20:22.563Z","files_total":30,"files_done":10,"bytes_total":314572800,"bytes_done":104857600,"current_speed_mbps":1250.0,"current_file":"/data/medium_11.bin","last_update":"2026-04-26T04:20:27.563Z"}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| pid | int | 进程 ID |
+| state | string | `"running"` 或 `"completed"` |
+| start_time | string | 复制开始时间（ISO 8601） |
+| files_total | int | 文件总数 |
+| files_done | int | 已完成文件数 |
+| bytes_total | int | 总字节数 |
+| bytes_done | int | 已完成字节数 |
+| current_speed_mbps | float | 全局平均速度（MB/s） |
+| current_file | string | 当前正在复制的文件路径 |
+| last_update | string | 最后更新时间（ISO 8601） |
+
+### 3.10 copy_complete — 复制完成汇总
+
+复制结束时发出。
+
+```json
+{"type":"file_info","event":"copy_complete","files_total":30,"files_done":31,"bytes_total":314572800,"bytes_done":314572800,"duration_ms":79,"speed_mbps_avg":3797.5,"timestamp":"..."}
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| files_total | int | 文件总数 |
+| files_done | int | 已完成文件数（含目录，可能 > files_total） |
+| bytes_total | int | 总字节数 |
+| bytes_done | int | 已完成字节数 |
+| duration_ms | int | 总耗时（毫秒） |
+| speed_mbps_avg | float | 全局平均速度（MB/s） |
+
+### 3.11 stuck_detected — I/O 卡住检测
+
+I/O 超过 `IOStuckTimeout` 秒无进展时发出。
+
+```json
+{"type":"file_info","event":"stuck_detected","round":5000,"stuck_seconds":30,"files_total":30,"files_done":10,"bytes_total":314572800,"bytes_done":104857600,"current_file":"/data/large.bin","timestamp":"..."}
+```
+
+### 3.12 CksumOnly 过滤模式
+
+CksumOnly 模式下，FileLog 仅输出以下事件，其余事件被过滤：
+`cksum_result`、`progress_summary`、`copy_complete`、`copy_plan`、`state_snapshot`
+
+---
+
+## 4. 使用场景与配置示例
+
+### 4.1 个人日常使用
 
 ```json
 {
@@ -292,7 +492,7 @@ acp 有两套日志系统：
 | Batch | `8` | 每批 IO 提交数量，对性能影响不大 |
 | IOReapWait | `1` | 一般无需调整 |
 
-### 3.2 企业数据迁移
+### 4.2 企业数据迁移
 
 ```json
 {
