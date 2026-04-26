@@ -390,7 +390,6 @@ static void SetupCliOptions(CLI::App& app, CliOptions& opts)
     app.add_flag("--dry-run", opts.dryRun, "Show effective config and mode without executing");
 
     app.add_option("paths", opts.positional, "Source and destination paths")
-       ->required()
        ->expected(-1);
 }
 
@@ -456,9 +455,12 @@ static void PrintDryRun(const RWCombinedCopyOptions& options,
     std::cout << "| IOStuckTimeout | `" << options.IOStuckTimeout << "` |\n";
 
     std::cout << "\n### 源路径\n";
-    for (const auto& s : srcPaths)
-        std::cout << "- `" << s << "`\n";
-    std::cout << "\n### 目标路径\n- `" << dstPath << "`\n";
+    if (srcPaths.empty())
+        std::cout << "- (未指定)\n";
+    else
+        for (const auto& s : srcPaths)
+            std::cout << "- `" << s << "`\n";
+    std::cout << "\n### 目标路径\n- `" << (dstPath.empty() ? "(未指定)" : dstPath) << "`\n";
 }
 
 int main(int argc, char *argv[])
@@ -587,6 +589,25 @@ int main(int argc, char *argv[])
 
     auto logger = InitLogger(options);
 
+    // ---------- dry-run：输出生效配置后直接退出 ----------
+    if (cliOpts.dryRun)
+    {
+        std::string dstPath = cliOpts.positional.size() >= 2 ? cliOpts.positional.back() : "";
+        std::vector<std::string> srcPaths;
+        if (cliOpts.positional.size() >= 2)
+            srcPaths.assign(cliOpts.positional.begin(), cliOpts.positional.end() - 1);
+        PrintDryRun(options, srcPaths, dstPath);
+        return 0;
+    }
+
+    // ---------- 路径参数校验 ----------
+    if (cliOpts.positional.size() < 2)
+    {
+        std::cerr << "Error: At least one source and one destination path are required.\n"
+                  << "Run with --help for more information." << std::endl;
+        return 1;
+    }
+
     std::string dstPath = cliOpts.positional.back();
     std::vector<std::string> srcPaths(cliOpts.positional.begin(), cliOpts.positional.end() - 1);
     bool multiSource = srcPaths.size() > 1;
@@ -605,13 +626,6 @@ int main(int argc, char *argv[])
     {
         logger->warn("Inotify is disabled in {} mode.", options.CopyMode);
         options.EnableInotify = false;
-    }
-
-    // ---------- dry-run：输出生效配置后直接退出 ----------
-    if (cliOpts.dryRun)
-    {
-        PrintDryRun(options, srcPaths, dstPath);
-        return 0;
     }
 
     // ---------- 路径校验层次 1：存在性 — 所有源路径必须存在 ----------
