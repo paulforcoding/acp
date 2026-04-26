@@ -21,6 +21,11 @@ option(BUILD_TESTS "Build tests" ON)
 # ---------------------------------------------------------------------------
 add_compile_options(-Wall -Wextra)
 
+# GCC false positives: spdlog/fmt triggers -Warray-bounds; std::regex triggers -Wmaybe-uninitialized
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(-Wno-array-bounds -Wno-maybe-uninitialized)
+endif()
+
 # ---------------------------------------------------------------------------
 # Platform detection
 # ---------------------------------------------------------------------------

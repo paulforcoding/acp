@@ -8,7 +8,6 @@
 #include <string>
 #include <thread>
 #include <unistd.h>
-#include <signal.h>
 
 // Write to a persistent, unbuffered log file that survives crashes and reboots
 inline void RawLog(const char *msg)
@@ -120,7 +119,7 @@ private:
             if (std::fgets(buf, sizeof(buf), wchan))
             {
                 buf[std::strcspn(buf, "\n")] = '\0';
-                char msg[256];
+                char msg[512];
                 std::snprintf(msg, sizeof(msg), "main wchan: %s", buf);
                 RawLog(msg);
             }
@@ -160,7 +159,7 @@ private:
                     if (std::fgets(wbuf, sizeof(wbuf), tw))
                     {
                         wbuf[std::strcspn(wbuf, "\n")] = '\0';
-                        char msg[256];
+                        char msg[512];
                         std::snprintf(msg, sizeof(msg), "  tid %s: %s", tid, wbuf);
                         RawLog(msg);
                     }
