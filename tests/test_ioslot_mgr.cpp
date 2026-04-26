@@ -1,6 +1,7 @@
 #include "lib/thirdparty/catch2/catch_amalgamated.hpp"
 #include "lib/mainlib.hpp"
 #include "base/logger.hpp"
+#include "test_run_logger.hpp"
 #include <filesystem>
 #include <fstream>
 #include <thread>
@@ -12,8 +13,9 @@ namespace fs = std::filesystem;
 static RWCombinedCopyOptions MakeOptions()
 {
     RWCombinedCopyOptions options;
-    options.ProgramLogLevel = "error";
-    options.ProgramLogMode = "console";
+    options.ProgramLogLevel = "info";
+    options.ProgramLogMode = "file";
+    options.ProgramLogFilePath = "/tmp/acp_program.log";
     options.FileLogEnabled = false;
 #ifdef __APPLE__
     options.CopyEngine = "gcd";
@@ -34,6 +36,7 @@ static RWCombinedCopyOptions MakeOptions()
 
 TEST_CASE("IOSlotMgr CopyOnly full round", "[ioslotmgr]")
 {
+    TestWatchdog watchdog(60, "IOSlotMgr CopyOnly full round");
     fs::path src = "/tmp/acp_ioslot_src.bin";
     fs::path dst = "/tmp/acp_ioslot_dst.bin";
     std::error_code ec;
@@ -48,7 +51,9 @@ TEST_CASE("IOSlotMgr CopyOnly full round", "[ioslotmgr]")
     }
 
     auto options = MakeOptions();
-    auto logger = std::make_shared<ConsoleLogger>();
+    // Clear previous log for clean diagnostics
+    { std::ofstream ofs(options.ProgramLogFilePath, std::ios::trunc); }
+    auto logger = InitLogger(options);
     int rc = CopyFile(src, dst, options, logger);
     REQUIRE(rc == 0);
     REQUIRE(fs::exists(dst));
@@ -60,6 +65,7 @@ TEST_CASE("IOSlotMgr CopyOnly full round", "[ioslotmgr]")
 
 TEST_CASE("IOSlotMgr CksumCopy match skip write", "[ioslotmgr]")
 {
+    TestWatchdog watchdog(60, "IOSlotMgr CksumCopy match skip write");
     fs::path src = "/tmp/acp_ioslot_ck_src.bin";
     fs::path dst = "/tmp/acp_ioslot_ck_dst.bin";
     std::error_code ec;
@@ -80,7 +86,8 @@ TEST_CASE("IOSlotMgr CksumCopy match skip write", "[ioslotmgr]")
 
     auto options = MakeOptions();
     options.CopyMode = "CksumCopy";
-    auto logger = std::make_shared<ConsoleLogger>();
+    { std::ofstream ofs(options.ProgramLogFilePath, std::ios::trunc); }
+    auto logger = InitLogger(options);
     int rc = CopyFile(src, dst, options, logger);
     REQUIRE(rc == 0);
     REQUIRE(fs::exists(dst));
@@ -92,6 +99,7 @@ TEST_CASE("IOSlotMgr CksumCopy match skip write", "[ioslotmgr]")
 
 TEST_CASE("IOSlotMgr CksumCopy mismatch do write", "[ioslotmgr]")
 {
+    TestWatchdog watchdog(60, "IOSlotMgr CksumCopy mismatch do write");
 
     fs::path src = "/tmp/acp_ioslot_ckm_src.bin";
     fs::path dst = "/tmp/acp_ioslot_ckm_dst.bin";
@@ -110,7 +118,8 @@ TEST_CASE("IOSlotMgr CksumCopy mismatch do write", "[ioslotmgr]")
     auto copyOnlyOpts = MakeOptions();
     copyOnlyOpts.CopyMode = "CopyOnly";
     copyOnlyOpts.PreserveMeta = false; // avoid mtime sync affecting CksumCopy fast path
-    auto logger = std::make_shared<ConsoleLogger>();
+    { std::ofstream ofs(copyOnlyOpts.ProgramLogFilePath, std::ios::trunc); }
+    auto logger = InitLogger(copyOnlyOpts);
     int rc = CopyFile(src, dst, copyOnlyOpts, logger);
     REQUIRE(rc == 0);
 
@@ -142,6 +151,7 @@ TEST_CASE("IOSlotMgr CksumCopy mismatch do write", "[ioslotmgr]")
 
 TEST_CASE("IOSlotMgr CksumOnly never write", "[ioslotmgr]")
 {
+    TestWatchdog watchdog(60, "IOSlotMgr CksumOnly never write");
     fs::path src = "/tmp/acp_ioslot_cko_src.bin";
     fs::path dst = "/tmp/acp_ioslot_cko_dst.bin";
     std::error_code ec;
@@ -162,7 +172,8 @@ TEST_CASE("IOSlotMgr CksumOnly never write", "[ioslotmgr]")
 
     auto options = MakeOptions();
     options.CopyMode = "CksumOnly";
-    auto logger = std::make_shared<ConsoleLogger>();
+    { std::ofstream ofs(options.ProgramLogFilePath, std::ios::trunc); }
+    auto logger = InitLogger(options);
     int rc = CopyFile(src, dst, options, logger);
     REQUIRE(rc == 0);
     REQUIRE(fs::exists(dst));
@@ -179,6 +190,7 @@ TEST_CASE("IOSlotMgr CksumOnly never write", "[ioslotmgr]")
 
 TEST_CASE("IOSlotMgr HandleReadCompletion EOF", "[ioslotmgr]")
 {
+    TestWatchdog watchdog(60, "IOSlotMgr HandleReadCompletion EOF");
     // 0-byte file triggers immediate EOF handling
     fs::path src = "/tmp/acp_ioslot_eof.bin";
     fs::path dst = "/tmp/acp_ioslot_eof_dst.bin";
@@ -191,7 +203,8 @@ TEST_CASE("IOSlotMgr HandleReadCompletion EOF", "[ioslotmgr]")
     }
 
     auto options = MakeOptions();
-    auto logger = std::make_shared<ConsoleLogger>();
+    { std::ofstream ofs(options.ProgramLogFilePath, std::ios::trunc); }
+    auto logger = InitLogger(options);
     int rc = CopyFile(src, dst, options, logger);
     REQUIRE(rc == 0);
     REQUIRE(fs::exists(dst));

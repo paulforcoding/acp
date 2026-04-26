@@ -301,12 +301,14 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     std::thread file_copy_thread(
         [fc = std::move(file_copier), &copyChannel, logger, &copyFailed]()
         {
+            logger->warn("CopyDir: file_copy_thread starting");
             auto copy_res = fc->RunChannel(copyChannel);
             if (!copy_res)
             {
                 logger->error("File copy failed: {}", copy_res.error().ToString());
                 copyFailed.store(true);
             }
+            logger->warn("CopyDir: file_copy_thread exiting, success={}", copy_res.has_value());
         });
 
     // 若目标目录不存在则提前创建，确保后续文件对可以直接写入

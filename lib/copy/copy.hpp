@@ -32,7 +32,7 @@ public:
     tl::expected<void, StackError> RunChannel(Channel<CopyEntry> &channel)
     {
         // 根据 CopyParallelism 创建对应数量的 CPFilePairMgr 和线程，每个线程独立执行 RunQueue
-        mLogger->debug("CopyEngine: Starting {} RunQueue threads.", mOptions.CopyParallelism);
+        mLogger->warn("CopyEngine: Starting {} RunQueue threads.", mOptions.CopyParallelism);
         std::vector<std::thread> threads;
         threads.reserve(mOptions.CopyParallelism);
         std::vector<std::unique_ptr<CPFilePairMgr>> cpfpMgrs;
@@ -81,13 +81,13 @@ public:
             }
         }
         // 所有文件对分发完毕，通知各 CPFilePairMgr 停止；工作线程在排空剩余 I/O 后自然退出
-        mLogger->debug("CopyEngine: All file pairs added, signaling stop to CPFilePairMgrs.");
+        mLogger->warn("CopyEngine: All file pairs added, signaling stop to CPFilePairMgrs.");
         for (auto &cpfpMgr : cpfpMgrs)
         {
             cpfpMgr->SetStopFlag();
         }
 
-        mLogger->debug("CopyEngine: Waiting for RunQueue thread to finish...");
+        mLogger->warn("CopyEngine: Waiting for RunQueue thread to finish...");
         for (auto &t : threads)
         {
             if (t.joinable())
@@ -95,7 +95,7 @@ public:
                 t.join();
             }
         }
-        mLogger->debug("CopyEngine: All RunQueue threads have finished.");
+        mLogger->warn("CopyEngine: All RunQueue threads have finished.");
 
         for (auto &err : threadErrors)
         {
@@ -146,6 +146,7 @@ private:
     // 每个工作线程的入口：根据平台/配置选择后端（libaio / liburing / GCD），然后执行 RunQueue 主循环
     void startCopyThread(CPFilePairMgr *cpfpMgr, std::optional<StackError> &outError)
     {
+        mLogger->warn("CopyEngine: RunQueue thread starting");
         std::unique_ptr<IOSlotMgr<IOSlot>> slotMgr;
 #ifdef __APPLE__
         slotMgr = std::make_unique<GCDSlotMgr>(mOptions, cpfpMgr, mLogger, mReporter);
@@ -172,6 +173,7 @@ private:
             mLogger->error("CopyEngine::RunChannel: RunQueue() failed, err: {}", run_res.error().ToString());
             outError = run_res.error();
         }
+        mLogger->warn("CopyEngine: RunQueue thread exiting, success={}", run_res.has_value());
     };
 
 private:
