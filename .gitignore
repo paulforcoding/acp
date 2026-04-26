@@ -59,6 +59,9 @@ CLAUDE.md
 .aiinputs/
 .claude/
 
+# human
+.zpdesign/
+
 # clangd
 compile_commands.json
 

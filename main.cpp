@@ -148,11 +148,7 @@ static void PrintHelp(const char* /*program_name*/)
 static void PrintHelpAllDesignDoc()
 {
     std::cout << R"HELPALL(
-# acp 用户体验优化设计
-
-> 不改动核心 I/O 复制逻辑，通过调整功能场景、日志输出和命令行交互，提升用户友好性。
-
----
+# acp 场景说明
 
 ## 1. 功能场景
 
@@ -410,7 +406,7 @@ static void PrintHelpAllCliOptions()
 static void PrintHelpAll()
 {
     PrintHelpAllDesignDoc();
-    PrintHelpAllCliOptions();
+    // PrintHelpAllCliOptions();
 }
 
 static void PrintDryRun(const RWCombinedCopyOptions& options,
@@ -471,6 +467,7 @@ int main(int argc, char *argv[])
 
     if (argc == 2 && (std::strcmp(argv[1], "--help") == 0 || std::strcmp(argv[1], "-h") == 0))
     {
+        PrintHelpAllCliOptions();
         PrintHelp(argv[0]);
         return 0;
     }

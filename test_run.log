@@ -1,0 +1,276 @@
+[2026-04-26T09:20:55] === TEST RUN START ===
+[2026-04-26T09:20:55] START: CLI CksumOnly type mismatch returns 1
+[2026-04-26T09:20:56] END: CLI CksumOnly type mismatch returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI same src dst returns 1
+[2026-04-26T09:20:56] END: CLI same src dst returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI subdirectory copy returns 1
+[2026-04-26T09:20:56] END: CLI subdirectory copy returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI help returns 0
+[2026-04-26T09:20:56] END: CLI help returns 0 | result=PASS
+[2026-04-26T09:20:56] START: CLI IOSize zero returns 1
+[2026-04-26T09:20:56] END: CLI IOSize zero returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI CksumCopy multi-source returns 1
+[2026-04-26T09:20:56] END: CLI CksumCopy multi-source returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI invalid engine returns 1
+[2026-04-26T09:20:56] END: CLI invalid engine returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI version returns 0
+[2026-04-26T09:20:56] END: CLI version returns 0 | result=PASS
+[2026-04-26T09:20:56] START: CLI dry-run returns 0
+[2026-04-26T09:20:56] END: CLI dry-run returns 0 | result=PASS
+[2026-04-26T09:20:56] START: CLI config file loading from cwd
+[2026-04-26T09:20:56] END: CLI config file loading from cwd | result=PASS
+[2026-04-26T09:20:56] START: CLI CksumOnly dst not exist returns 1
+[2026-04-26T09:20:56] END: CLI CksumOnly dst not exist returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI multi-source non-dir dst returns 1
+[2026-04-26T09:20:56] END: CLI multi-source non-dir dst returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI missing source returns 1
+[2026-04-26T09:20:56] END: CLI missing source returns 1 | result=PASS
+[2026-04-26T09:20:56] START: CLI multi-source inotify disabled
+[2026-04-26T09:20:56] END: CLI multi-source inotify disabled | result=PASS
+[2026-04-26T09:20:56] START: CLI CksumOnly multi-source returns 1
+[2026-04-26T09:20:56] END: CLI CksumOnly multi-source returns 1 | result=PASS
+[2026-04-26T09:20:56] === TEST RUN END ===
+[2026-04-26T09:21:10] === TEST RUN START ===
+[2026-04-26T09:21:10] START: PM-30: directory tree with all metadata preserved then CksumOnly match
+[2026-04-26T09:21:10] END: PM-30: directory tree with all metadata preserved then CksumOnly match | result=PASS
+[2026-04-26T09:21:10] START: Digest known input
+[2026-04-26T09:21:10] END: Digest known input | result=PASS
+[2026-04-26T09:21:10] START: CLI subdirectory copy returns 1
+[2026-04-26T09:21:10] END: CLI subdirectory copy returns 1 | result=PASS
+[2026-04-26T09:21:10] START: FuncDurationStat multiple entries
+[2026-04-26T09:21:10] END: FuncDurationStat multiple entries | result=PASS
+[2026-04-26T09:21:10] START: CPFilePair compare timestamp mismatch
+[2026-04-26T09:21:10] END: CPFilePair compare timestamp mismatch | result=PASS
+[2026-04-26T09:21:10] START: ConsoleLogger log_impl outputs all levels
+[2026-04-26T09:21:10] END: ConsoleLogger log_impl outputs all levels | result=PASS
+[2026-04-26T09:21:10] START: ILogger set_level case insensitive
+[2026-04-26T09:21:10] END: ILogger set_level case insensitive | result=PASS
+[2026-04-26T09:21:10] START: CPFilePairMgr GetNextReadIO single file
+[2026-04-26T09:21:10] END: CPFilePairMgr GetNextReadIO single file | result=PASS
+[2026-04-26T09:21:10] START: FPChannel Close wakes waiters
+[2026-04-26T09:21:10] END: FPChannel Close wakes waiters | result=PASS
+[2026-04-26T09:21:10] START: ScanDirIntoChannel flat files
+[2026-04-26T09:21:11] END: ScanDirIntoChannel flat files | result=PASS
+[2026-04-26T09:21:11] START: CLI version returns 0
+[2026-04-26T09:21:11] END: CLI version returns 0 | result=PASS
+[2026-04-26T09:21:11] START: CLI CksumCopy multi-source returns 1
+[2026-04-26T09:21:12] END: CLI CksumCopy multi-source returns 1 | result=PASS
+[2026-04-26T09:21:12] START: CPFilePair CksumCopy size_mtime fast path
+[2026-04-26T09:21:13] END: CPFilePair CksumCopy size_mtime fast path | result=PASS
+[2026-04-26T09:21:13] START: Channel blocks until push
+[2026-04-26T09:21:13] END: Channel blocks until push | result=PASS
+[2026-04-26T09:21:13] START: IOSlotMgr CopyOnly full round
+[2026-04-26T09:21:13] END: IOSlotMgr CopyOnly full round | result=PASS
+[2026-04-26T09:21:13] START: CPFilePair ftruncate fails on read-only dst
+[2026-04-26T09:21:13] END: CPFilePair ftruncate fails on read-only dst | result=PASS
+[2026-04-26T09:21:13] START: CPFilePair open src EACCES
+[2026-04-26T09:21:13] END: CPFilePair open src EACCES | result=PASS
+[2026-04-26T09:21:13] START: PM-20: manual mode change then CksumOnly reports mode_mismatch
+[2026-04-26T09:21:14] END: PM-20: manual mode change then CksumOnly reports mode_mismatch | result=PASS
+[2026-04-26T09:21:14] START: FileLogReporter state file atomic write
+[2026-04-26T09:21:14] END: FileLogReporter state file atomic write | result=PASS
+[2026-04-26T09:21:14] START: InotifyChannel deduplication and pop
+[2026-04-26T09:21:14] END: InotifyChannel deduplication and pop | result=PASS
+[2026-04-26T09:21:14] START: PM-22: manual xattr deletion then CksumOnly reports xattr_mismatch
+[2026-04-26T09:21:14] END: PM-22: manual xattr deletion then CksumOnly reports xattr_mismatch | result=PASS
+[2026-04-26T09:21:14] START: CLI CksumOnly dst not exist returns 1
+[2026-04-26T09:21:14] END: CLI CksumOnly dst not exist returns 1 | result=PASS
+[2026-04-26T09:21:14] START: AllocBytes small allocation
+[2026-04-26T09:21:14] END: AllocBytes small allocation | result=PASS
+[2026-04-26T09:21:14] START: PM-08: directory metadata preserved then CksumOnly match
+[2026-04-26T09:21:17] END: PM-08: directory metadata preserved then CksumOnly match | result=PASS
+[2026-04-26T09:21:17] START: GCDSlotMgr read error propagation
+[2026-04-26T09:21:17] END: GCDSlotMgr read error propagation | result=PASS
+[2026-04-26T09:21:17] START: IOSlotMgr HandleReadCompletion EOF
+[2026-04-26T09:21:18] END: IOSlotMgr HandleReadCompletion EOF | result=PASS
+[2026-04-26T09:21:18] START: FPChannel concurrent push and pop
+[2026-04-26T09:21:18] END: FPChannel concurrent push and pop | result=PASS
+[2026-04-26T09:21:18] START: CPFilePair zero size file
+[2026-04-26T09:21:18] END: CPFilePair zero size file | result=PASS
+[2026-04-26T09:21:18] START: SpdLogger null logger
+[2026-04-26T09:21:18] END: SpdLogger null logger | result=PASS
+[2026-04-26T09:21:18] START: PM-10: xattr not preserved then CksumOnly reports xattr_mismatch
+[2026-04-26T09:21:18] END: PM-10: xattr not preserved then CksumOnly reports xattr_mismatch | result=PASS
+[2026-04-26T09:21:18] START: CPFilePair symlink copy
+[2026-04-26T09:21:18] END: CPFilePair symlink copy | result=PASS
+[2026-04-26T09:21:18] START: FuncDurationStat time_point overload
+[2026-04-26T09:21:18] END: FuncDurationStat time_point overload | result=PASS
+[2026-04-26T09:21:18] START: CLI multi-source non-dir dst returns 1
+[2026-04-26T09:21:18] END: CLI multi-source non-dir dst returns 1 | result=PASS
+[2026-04-26T09:21:18] START: IOSlotMgr CksumCopy mismatch do write
+[2026-04-26T09:21:19] END: IOSlotMgr CksumCopy mismatch do write | result=PASS
+[2026-04-26T09:21:19] START: MergeCopyOptions missing CopyOptions
+[2026-04-26T09:21:19] END: MergeCopyOptions missing CopyOptions | result=PASS
+[2026-04-26T09:21:19] START: CopyEntry equality
+[2026-04-26T09:21:19] END: CopyEntry equality | result=PASS
+[2026-04-26T09:21:19] START: CLI CksumOnly type mismatch returns 1
+[2026-04-26T09:21:19] END: CLI CksumOnly type mismatch returns 1 | result=PASS
+[2026-04-26T09:21:19] START: ILogger unknown level leaves unchanged
+[2026-04-26T09:21:19] END: ILogger unknown level leaves unchanged | result=PASS
+[2026-04-26T09:21:19] START: Channel push/pop and close behavior
+[2026-04-26T09:21:19] END: Channel push/pop and close behavior | result=PASS
+[2026-04-26T09:21:19] START: CLI IOSize zero returns 1
+[2026-04-26T09:21:19] END: CLI IOSize zero returns 1 | result=PASS
+[2026-04-26T09:21:19] START: MergeCopyOptions partial override
+[2026-04-26T09:21:19] END: MergeCopyOptions partial override | result=PASS
+[2026-04-26T09:21:19] START: CPFilePair IsAllZeros unaligned size
+[2026-04-26T09:21:19] END: CPFilePair IsAllZeros unaligned size | result=PASS
+[2026-04-26T09:21:19] START: CPFilePair DoDstState
+[2026-04-26T09:21:19] BODY_START: CPFilePair DoDstState
+[2026-04-26T09:21:19] BODY_END: CPFilePair DoDstState
+[2026-04-26T09:21:19] END: CPFilePair DoDstState | result=PASS
+[2026-04-26T09:21:19] START: IOSlotMgr CksumCopy match skip write
+[2026-04-26T09:21:20] END: IOSlotMgr CksumCopy match skip write | result=PASS
+[2026-04-26T09:21:20] START: ILogger enabled boundary
+[2026-04-26T09:21:20] END: ILogger enabled boundary | result=PASS
+[2026-04-26T09:21:20] START: CPFilePair offset tracking
+[2026-04-26T09:21:20] END: CPFilePair offset tracking | result=PASS
+[2026-04-26T09:21:20] START: CPFilePair source file does not exist
+[2026-04-26T09:21:20] END: CPFilePair source file does not exist | result=PASS
+[2026-04-26T09:21:20] START: ScanDirIntoChannel circular symlink
+[2026-04-26T09:21:21] END: ScanDirIntoChannel circular symlink | result=PASS
+[2026-04-26T09:21:21] START: CPFilePair symlink overwrites existing dst
+[2026-04-26T09:21:21] END: CPFilePair symlink overwrites existing dst | result=PASS
+[2026-04-26T09:21:21] START: PM-06: symlink metadata preserved then CksumOnly match
+[2026-04-26T09:21:22] END: PM-06: symlink metadata preserved then CksumOnly match | result=PASS
+[2026-04-26T09:21:22] START: PM-40: deferred directory metadata with CopyParallelism > 1 and 1000+ files
+[2026-04-26T09:21:24] END: PM-40: deferred directory metadata with CopyParallelism > 1 and 1000+ files | result=PASS
+[2026-04-26T09:21:24] START: Digest large buffer
+[2026-04-26T09:21:24] END: Digest large buffer | result=PASS
+[2026-04-26T09:21:24] START: CLI multi-source inotify disabled
+[2026-04-26T09:21:24] END: CLI multi-source inotify disabled | result=PASS
+[2026-04-26T09:21:24] START: PM-05: timestamp not preserved then CksumOnly reports timestamp_mismatch
+[2026-04-26T09:21:25] END: PM-05: timestamp not preserved then CksumOnly reports timestamp_mismatch | result=PASS
+[2026-04-26T09:21:25] START: SP-01: sparse file with hole in middle is preserved
+[2026-04-26T09:21:26] END: SP-01: sparse file with hole in middle is preserved | result=PASS
+[2026-04-26T09:21:26] START: CPFilePair truncate and fsync
+[2026-04-26T09:21:26] END: CPFilePair truncate and fsync | result=PASS
+[2026-04-26T09:21:26] START: CPFilePair preserve mode
+[2026-04-26T09:21:26] END: CPFilePair preserve mode | result=PASS
+[2026-04-26T09:21:26] START: MergeCopyOptions full override
+[2026-04-26T09:21:26] END: MergeCopyOptions full override | result=PASS
+[2026-04-26T09:21:26] START: MergeCopyOptions invalid JSON
+[2026-04-26T09:21:26] END: MergeCopyOptions invalid JSON | result=PASS
+[2026-04-26T09:21:26] START: AllocBytes sector aligned
+[2026-04-26T09:21:26] END: AllocBytes sector aligned | result=PASS
+[2026-04-26T09:21:26] START: PM-31: directory tree without PreserveMeta then CksumOnly reports mismatches
+[2026-04-26T09:21:26] END: PM-31: directory tree without PreserveMeta then CksumOnly reports mismatches | result=PASS
+[2026-04-26T09:21:26] START: ScanDirIntoChannel symlink to file
+[2026-04-26T09:21:27] END: ScanDirIntoChannel symlink to file | result=PASS
+[2026-04-26T09:21:27] START: CLI CksumOnly multi-source returns 1
+[2026-04-26T09:21:27] END: CLI CksumOnly multi-source returns 1 | result=PASS
+[2026-04-26T09:21:27] START: CPFilePair dst directory creation failure
+[2026-04-26T09:21:27] END: CPFilePair dst directory creation failure | result=PASS
+[2026-04-26T09:21:27] START: CPFilePairMgr PeekFront after AddFilePair
+[2026-04-26T09:21:27] END: CPFilePairMgr PeekFront after AddFilePair | result=PASS
+[2026-04-26T09:21:27] START: InotifyChannel dedupe and pop
+[2026-04-26T09:21:27] END: InotifyChannel dedupe and pop | result=PASS
+[2026-04-26T09:21:27] START: FuncDurationStat single entry
+[2026-04-26T09:21:27] END: FuncDurationStat single entry | result=PASS
+[2026-04-26T09:21:27] START: CPFilePair directory copy
+[2026-04-26T09:21:27] END: CPFilePair directory copy | result=PASS
+[2026-04-26T09:21:27] START: CLI help returns 0
+[2026-04-26T09:21:27] END: CLI help returns 0 | result=PASS
+[2026-04-26T09:21:27] START: Channel Size concurrent
+[2026-04-26T09:21:27] END: Channel Size concurrent | result=PASS
+[2026-04-26T09:21:27] START: FuncDurationStat empty stats
+[2026-04-26T09:21:27] END: FuncDurationStat empty stats | result=PASS
+[2026-04-26T09:21:27] START: FileLogReporter FileStart event format
+[2026-04-26T09:21:27] END: FileLogReporter FileStart event format | result=PASS
+[2026-04-26T09:21:27] START: Channel push/pop basic
+[2026-04-26T09:21:27] END: Channel push/pop basic | result=PASS
+[2026-04-26T09:21:27] START: IOSlotMgr CksumOnly never write
+[2026-04-26T09:21:28] END: IOSlotMgr CksumOnly never write | result=PASS
+[2026-04-26T09:21:28] START: CPFilePair IsAllZeros not zero
+[2026-04-26T09:21:28] END: CPFilePair IsAllZeros not zero | result=PASS
+[2026-04-26T09:21:28] START: PM-04: timestamp precision preserved then CksumOnly match
+[2026-04-26T09:21:29] END: PM-04: timestamp precision preserved then CksumOnly match | result=PASS
+[2026-04-26T09:21:29] START: ScanDirIntoChannel dangling symlink
+[2026-04-26T09:21:31] END: ScanDirIntoChannel dangling symlink | result=PASS
+[2026-04-26T09:21:31] START: CPFilePairMgr GetNextReadIO returns null at end
+[2026-04-26T09:21:31] END: CPFilePairMgr GetNextReadIO returns null at end | result=PASS
+[2026-04-26T09:21:31] START: CPFilePair IsAllZeros all zero
+[2026-04-26T09:21:31] END: CPFilePair IsAllZeros all zero | result=PASS
+[2026-04-26T09:21:31] START: FileLogReporter progress summary ETA zero when no progress
+[2026-04-26T09:21:31] END: FileLogReporter progress summary ETA zero when no progress | result=PASS
+[2026-04-26T09:21:31] START: FileLogReporter StuckDetected event
+[2026-04-26T09:21:31] END: FileLogReporter StuckDetected event | result=PASS
+[2026-04-26T09:21:31] START: ScanDirIntoChannel unsupported type fifo
+[2026-04-26T09:21:32] END: ScanDirIntoChannel unsupported type fifo | result=PASS
+[2026-04-26T09:21:32] START: Watchdog timing verification with large file copy
+[2026-04-26T09:21:32] END: Watchdog timing verification with large file copy | result=PASS
+[2026-04-26T09:21:32] START: FPChannel Push Peek Pop sequence
+[2026-04-26T09:21:32] END: FPChannel Push Peek Pop sequence | result=PASS
+[2026-04-26T09:21:32] START: CPFilePair directory already exists
+[2026-04-26T09:21:32] END: CPFilePair directory already exists | result=PASS
+[2026-04-26T09:21:32] START: CPFilePair short read does not overestimate
+[2026-04-26T09:21:32] END: CPFilePair short read does not overestimate | result=PASS
+[2026-04-26T09:21:32] START: PM-02: PreserveMeta=false then CksumOnly reports mismatch
+[2026-04-26T09:21:33] END: PM-02: PreserveMeta=false then CksumOnly reports mismatch | result=PASS
+[2026-04-26T09:21:33] START: Channel Close returns error on empty pop
+[2026-04-26T09:21:33] END: Channel Close returns error on empty pop | result=PASS
+[2026-04-26T09:21:33] START: CPFilePair compare mode mismatch
+[2026-04-26T09:21:33] END: CPFilePair compare mode mismatch | result=PASS
+[2026-04-26T09:21:33] START: CPFilePair preserve timestamps
+[2026-04-26T09:21:33] END: CPFilePair preserve timestamps | result=PASS
+[2026-04-26T09:21:33] START: CPFilePairMgr CheckWriteComplete with finished file
+[2026-04-26T09:21:33] END: CPFilePairMgr CheckWriteComplete with finished file | result=PASS
+[2026-04-26T09:21:33] START: DedupList push/remove semantics
+[2026-04-26T09:21:33] END: DedupList push/remove semantics | result=PASS
+[2026-04-26T09:21:33] START: CLI missing source returns 1
+[2026-04-26T09:21:34] END: CLI missing source returns 1 | result=PASS
+[2026-04-26T09:21:34] START: CLI same src dst returns 1
+[2026-04-26T09:21:34] END: CLI same src dst returns 1 | result=PASS
+[2026-04-26T09:21:34] START: FPChannel WaitForWorkOrClose inflight
+[2026-04-26T09:21:34] END: FPChannel WaitForWorkOrClose inflight | result=PASS
+[2026-04-26T09:21:34] START: ConsoleLogger filters below level
+[2026-04-26T09:21:34] END: ConsoleLogger filters below level | result=PASS
+[2026-04-26T09:21:34] START: CPFilePairMgr multiple files round robin
+[2026-04-26T09:21:34] END: CPFilePairMgr multiple files round robin | result=PASS
+[2026-04-26T09:21:34] START: CPFilePairMgr WaitForWorkOrClose lifecycle
+[2026-04-26T09:21:34] END: CPFilePairMgr WaitForWorkOrClose lifecycle | result=PASS
+[2026-04-26T09:21:34] START: AllocBytes larger alignment
+[2026-04-26T09:21:34] END: AllocBytes larger alignment | result=PASS
+[2026-04-26T09:21:34] START: SP-02: non-sparse file copy is not affected by heuristic
+[2026-04-26T09:21:34] END: SP-02: non-sparse file copy is not affected by heuristic | result=PASS
+[2026-04-26T09:21:34] START: CPFilePair source is a fifo
+[2026-04-26T09:21:34] END: CPFilePair source is a fifo | result=PASS
+[2026-04-26T09:21:34] START: Digest empty data
+[2026-04-26T09:21:34] END: Digest empty data | result=PASS
+[2026-04-26T09:21:34] START: Digest different inputs produce different outputs
+[2026-04-26T09:21:34] END: Digest different inputs produce different outputs | result=PASS
+[2026-04-26T09:21:34] START: PM-21: manual timestamp change then CksumOnly reports timestamp_mismatch
+[2026-04-26T09:21:35] END: PM-21: manual timestamp change then CksumOnly reports timestamp_mismatch | result=PASS
+[2026-04-26T09:21:35] START: FileLogReporter concurrent AddBytesDone
+[2026-04-26T09:21:35] END: FileLogReporter concurrent AddBytesDone | result=PASS
+[2026-04-26T09:21:35] START: FileLogReporter FileComplete speed calc no div zero
+[2026-04-26T09:21:35] END: FileLogReporter FileComplete speed calc no div zero | result=PASS
+[2026-04-26T09:21:35] START: ScanDirIntoChannel nested dirs
+[2026-04-26T09:21:36] END: ScanDirIntoChannel nested dirs | result=PASS
+[2026-04-26T09:21:36] START: Backend DirectIO unaligned size
+[2026-04-26T09:21:36] END: Backend DirectIO unaligned size | result=PASS
+[2026-04-26T09:21:36] START: PM-01: PreserveMeta=true then CksumOnly reports match
+[2026-04-26T09:21:37] END: PM-01: PreserveMeta=true then CksumOnly reports match | result=PASS
+[2026-04-26T09:21:37] START: PM-07: dangling symlink metadata then CksumOnly match
+[2026-04-26T09:21:40] END: PM-07: dangling symlink metadata then CksumOnly match | result=PASS
+[2026-04-26T09:21:40] START: FreeBytes with nullptr
+[2026-04-26T09:21:40] END: FreeBytes with nullptr | result=PASS
+[2026-04-26T09:21:40] START: CPFilePair dangling symlink
+[2026-04-26T09:21:40] END: CPFilePair dangling symlink | result=PASS
+[2026-04-26T09:21:40] START: FileLogReporter disabled no output
+[2026-04-26T09:21:40] END: FileLogReporter disabled no output | result=PASS
+[2026-04-26T09:21:40] START: CLI config file loading from cwd
+[2026-04-26T09:21:40] END: CLI config file loading from cwd | result=PASS
+[2026-04-26T09:21:40] START: CLI dry-run returns 0
+[2026-04-26T09:21:40] END: CLI dry-run returns 0 | result=PASS
+[2026-04-26T09:21:40] START: Digest cross-verify same input
+[2026-04-26T09:21:40] END: Digest cross-verify same input | result=PASS
+[2026-04-26T09:21:40] START: PM-09: xattr preserved then CksumOnly match
+[2026-04-26T09:21:41] END: PM-09: xattr preserved then CksumOnly match | result=PASS
+[2026-04-26T09:21:41] START: GCDSlotMgr write error propagation
+[2026-04-26T09:21:41] END: GCDSlotMgr write error propagation | result=PASS
+[2026-04-26T09:21:41] START: CPFilePair CksumCopy fast path same mtime
+[2026-04-26T09:21:41] END: CPFilePair CksumCopy fast path same mtime | result=PASS
+[2026-04-26T09:21:41] START: CLI invalid engine returns 1
+[2026-04-26T09:21:41] END: CLI invalid engine returns 1 | result=PASS
+[2026-04-26T09:21:41] === TEST RUN END ===
