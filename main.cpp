@@ -159,8 +159,8 @@ acp 支持三种功能场景，由 `CopyMode` 配置项决定：
 | 场景 | CopyMode 值 | 说明 |
 |------|-------------|------|
 | 全量复制 | `CopyOnly` | 从源读取并写入目标，行为与 `cp` 类似 |
-| 数据校验 | `CksumOnly` | 校验源与目标的差异，不写入，始终逐块校验（不做 mtime+size 快速跳过），结果记录到 FileLog |
-| 增量复制 | `CksumCopy` | 校验源与目标的差异，仅写入差异数据（mtime+size 一致时快速跳过，仅对不一致文件逐块校验） |
+| 数据校验 | `CksumOnly` | 校验源与目标的差异，不写入，始终逐块校验（不做 mtime+size 快速跳过），结果记录到 FileLog（自动启用） |
+| 增量复制 | `CksumCopy` | 校验源与目标的差异，仅写入差异数据（mtime+size 一致时快速跳过，仅对不一致文件逐块校验），校验结果记录到 FileLog（自动启用） |
 
 ### 1.1 全量复制（CopyOnly）
 
@@ -275,7 +275,7 @@ acp 有两套日志系统：
 |--------|-----|------|
 | ProgramLogLevel | `error` | 一般人对复制过程不感兴趣 |
 | ProgramLogMode | `console` | 有报错直接输出，和 `cp` 行为一致 |
-| FileLogEnabled | `false` | 无输出即表示全部复制成功，和 `cp` 行为一致；CksumOnly 模式自动启用；AI agent 运行时设为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，可在复制过程中查询进度 |
+| FileLogEnabled | `false` | 无输出即表示全部复制成功，和 `cp` 行为一致；CksumOnly / CksumCopy 模式自动启用；AI agent 运行时设为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，可在复制过程中查询进度 |
 | CopyEngine | `liburing` / `libaio` | Linux 选 `liburing` 或 `libaio`，macOS 只能选 `GCD` |
 | CksumAlgorithm | `xxhash64` | 默认即可 |
 | CopyParallelism | `1` | 单线程异步复制已足够快 |
@@ -323,7 +323,7 @@ acp 有两套日志系统：
 |--------|-----|------|
 | ProgramLogLevel | `error` | 同上 |
 | ProgramLogMode | `file` | 保留日志供运维人员排查 |
-| FileLogEnabled | `true` | 设置为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，复制前清除文件，复制中可查询进度；CksumOnly 模式会自动启用 |
+| FileLogEnabled | `true` | 设置为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，复制前清除文件，复制中可查询进度；CksumOnly / CksumCopy 模式会自动启用 |
 | CopyEngine | `liburing` / `libaio` | Linux 选 `liburing` 或 `libaio`，macOS 只能选 `GCD` |
 | CksumAlgorithm | `xxhash64` | 默认即可 |
 | CopyParallelism | `1`–`8` | 异步复制 1 通常够快；性能峰值一般在 1–8 之间，过大收益递减 |
@@ -542,8 +542,8 @@ int main(int argc, char *argv[])
     if (cliOpts.disableFileLog)     options.FileLogEnabled = false;
     if (cliOpts.enableInotify)      options.EnableInotify = true;
 
-    // CksumOnly: 校验结果必须可见，自动启用 FileLog
-    if (options.CopyMode == "CksumOnly" && !cliOpts.disableFileLog)
+    // CksumOnly / CksumCopy: 校验结果必须可见，自动启用 FileLog
+    if ((options.CopyMode == "CksumOnly" || options.CopyMode == "CksumCopy") && !cliOpts.disableFileLog)
         options.FileLogEnabled = true;
     if (cliOpts.disableInotify)     options.EnableInotify = false;
     if (cliOpts.enableSparse)       options.PreserveSparseFiles = true;
