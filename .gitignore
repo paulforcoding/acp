@@ -58,6 +58,7 @@ CLAUDE.md
 .aireports/
 .aiinputs/
 .claude/
+test_run.log
 
 # human
 .zpdesign/
