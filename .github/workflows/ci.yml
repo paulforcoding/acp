@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, fix/test-hang, feature/v0.5.1]
+    branches: [main, feature/v0.5.1]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -70,7 +70,7 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
-        timeout-minutes: 15
+        timeout-minutes: 5
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Upload test logs (unit)
@@ -87,7 +87,7 @@ jobs:
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 30
+        timeout-minutes: 10
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload test logs (integration)
@@ -168,7 +168,7 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Test (unit + light integration)
-        timeout-minutes: 15
+        timeout-minutes: 5
         run: ctest --test-dir build --output-on-failure -E integration
 
       - name: Upload test logs (unit)
@@ -185,7 +185,7 @@ jobs:
 
       - name: Test (full integration)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        timeout-minutes: 30
+        timeout-minutes: 10
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload test logs (integration)
@@ -247,7 +247,7 @@ jobs:
         run: cmake --build build -j$(sysctl -n hw.ncpu)
 
       - name: Test
-        timeout-minutes: 20
+        timeout-minutes: 5
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload test logs
@@ -307,7 +307,7 @@ jobs:
         run: cmake --build build -j$(nproc)
 
       - name: Test (full suite)
-        timeout-minutes: 30
+        timeout-minutes: 5
         run: ctest --test-dir build --output-on-failure
 
       - name: Upload test logs

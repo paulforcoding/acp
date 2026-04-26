@@ -280,17 +280,7 @@ public:
     size_t PendingCount() { return mChannel.PendingCount(); }
     size_t InflightCount() { return mChannel.InflightCount(); }
 
-    // Dump internal state for hang diagnosis (always at warn level so it's captured)
-    void DumpState() const
-    {
-        mLogger->warn("CPFilePairMgr state: pending={}, inflight={}, closed={}",
-                       mChannel.PendingCount(), mChannel.InflightCount(), mChannel.IsClosed());
-    }
 
-    void DumpChannelState() const
-    {
-        mChannel.DumpPendingItems(mLogger);
-    }
 
 private:
     tl::expected<bool, StackError> CheckReadCompleteNoLock(std::shared_ptr<CPFilePair> pFP);
@@ -580,7 +570,7 @@ public:
         size_t lastBytesDone = 0;
         auto lastProgressTime = std::chrono::steady_clock::now();
         const bool watchdogEnabled = (mOptions.IOStuckTimeout > 0 && !mOptions.EnableInotify);
-        auto lastStateDumpTime = std::chrono::steady_clock::now();
+
 
         while (true)
         {
@@ -640,15 +630,6 @@ public:
                     mLogger->warn("RunQueue: exiting at round={}, channel closed and no work", round);
                     break;
                 }
-                // Dump state periodically; use warn for first idle round to capture early state
-                if (round % 10 == 0 || round == 0)
-                {
-                    mLogger->warn("RunQueue: idle at round={}, pending={}, inflight={}, cksum_queue={}, closed={}",
-                                   round, mCPFPMgr->PendingCount(), mCPFPMgr->InflightCount(),
-                                   mCksumQueue.size(), mCPFPMgr->IsStopRequested());
-                    DumpState();
-                    mCPFPMgr->DumpChannelState();
-                }
             }
 
             if (mReporter)
@@ -705,7 +686,6 @@ public:
                                        "files_done={}, bytes_done={}",
                                        elapsedSec,
                                        filesDone, bytesDone);
-                        DumpState();
                         return tl::unexpected(
                             StackError(fmt::format(
                                 "IO stuck: no progress for {}s "
@@ -716,21 +696,6 @@ public:
                 }
                 lastFilesDone = filesDone;
                 lastBytesDone = bytesDone;
-            }
-
-            // === Periodic state dump for hang diagnosis (every 30s) ===
-            {
-                auto now = std::chrono::steady_clock::now();
-                auto dumpElapsed = std::chrono::duration_cast<std::chrono::seconds>(now - lastStateDumpTime).count();
-                if (dumpElapsed >= 30)
-                {
-                    mLogger->warn("RunQueue periodic state dump: round={}, files_done={}, bytes_done={}",
-                                   round,
-                                   mReporter ? mReporter->GetFilesDone() : 0,
-                                   mReporter ? mReporter->GetBytesDone() : 0);
-                    DumpState();
-                    lastStateDumpTime = now;
-                }
             }
 
             round++;
@@ -746,46 +711,6 @@ public:
         mFuncDurationStat = stat;
     }
 
-    // Dump internal state for hang diagnosis (always at warn level)
-    void DumpState() const
-    {
-        std::map<IOSlot::Status, int> rwStatusCount;
-        for (auto &slot_up : mRWSlots)
-            rwStatusCount[slot_up->GetStatus()]++;
-
-        mLogger->warn("IOSlotMgr state: rw_slots={}", mRWSlots.size());
-        for (const auto &[status, count] : rwStatusCount)
-            mLogger->warn("  rw slot: {} x{}", IOSlot::StatusToStr(status), count);
-
-        if (!mCksumSlots.empty())
-        {
-            std::map<IOSlot::Status, int> cksumStatusCount;
-            for (auto &slot_up : mCksumSlots)
-                cksumStatusCount[slot_up->GetStatus()]++;
-
-            mLogger->warn("  cksum_slots={}, cksum_queue={}", mCksumSlots.size(), mCksumQueue.size());
-            for (const auto &[status, count] : cksumStatusCount)
-                mLogger->warn("  cksum slot: {} x{}", IOSlot::StatusToStr(status), count);
-        }
-
-        // Log details of non-Init slots for deeper diagnosis
-        for (auto &slot_up : mRWSlots)
-        {
-            auto st = slot_up->GetStatus();
-            if (st != IOSlot::Status::Init)
-            {
-                auto ioInfo = slot_up->GetIOInfo();
-                std::string srcPath;
-                if (slot_up->GetCPFPPtr())
-                    srcPath = slot_up->GetCPFPPtr()->GetSrcPath();
-                mLogger->warn("  rw[{}]: status={}, offset={}, io_size={}, src={}",
-                               slot_up->GetID(), IOSlot::StatusToStr(st),
-                               ioInfo.offset, ioInfo.io_size, srcPath);
-            }
-        }
-
-        mCPFPMgr->DumpState();
-    }
 
 protected:
     SlotType *GetOneFreeCksumSlot()
