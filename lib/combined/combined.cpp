@@ -236,7 +236,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             mSkipBlockCksum = true;
             mReadBytes = static_cast<size_t>(mSrcStat.st_size);
             mWrittenBytes = static_cast<size_t>(mSrcStat.st_size);
-            RecordCksumContent("skipped", "dst_missing");
+            RecordCksumContent("dst_missing");
             return {};
         }
         if (mReporter)
@@ -275,7 +275,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                     {
                         mReporter->FileStart(mSrcPath, mDstPath, GetSrcFileSize());
                     }
-                    RecordCksumContent("match", "size_mtime_match");
+                    RecordCksumContent("size_mtime_match");
                     return {};
                 }
             }
@@ -454,15 +454,15 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                 // - Mismatches are already emitted per-block in HandleReadCompletion.
                 if (!pFP->IsSkipBlockCksum() && !pFP->GetCksumError())
                 {
-                    pFP->RecordCksumContent("match", "content_match");
+                    pFP->RecordCksumContent("match");
                 }
                 else if (pFP->GetCksumError())
                 {
-                    pFP->RecordCksumContent("mismatch", "content_mismatch");
+                    pFP->RecordCksumContent("mismatch");
                 }
                 else if (pFP->GetCksumContentResult().empty())
                 {
-                    pFP->RecordCksumContent("skipped", "block_cksum_skipped");
+                    pFP->RecordCksumContent("not_applicable");
                 }
                 auto diff_res = pFP->CompareMetadata();
                 if (!diff_res)
@@ -730,15 +730,15 @@ tl::expected<void, StackError> CPFilePair::PreserveAcl()
 
 // === CompareMetadata 实现（CksumOnly 专用） ===
 
-void CPFilePair::RecordCksumContent(const std::string &result, const std::string &reason)
+void CPFilePair::RecordCksumContent(const std::string &contentValue)
 {
-    mCksumContentResult = result;
+    mCksumContentResult = contentValue;
     mCksumMetaResult.clear();
     mCksumMetaDetails.clear();
-    // For terminal cases (no further meta comparison), flush immediately
-    if (reason == "dst_missing" || reason == "size_mtime_match")
+    // For CksumCopy size_mtime_match fast path, flush immediately (no meta comparison)
+    if (contentValue == "size_mtime_match")
     {
-        mCksumMetaResult = "skipped";
+        mCksumMetaResult = "not_applicable";
         FlushCksumResult();
     }
 }
@@ -753,9 +753,9 @@ void CPFilePair::RecordCksumMetaMismatch(const std::string &reason, const std::s
         mCksumMetaDetails.push_back(reason);
 }
 
-void CPFilePair::RecordCksumMetaSkipped(const std::string &reason)
+void CPFilePair::RecordCksumMetaDstMissing(const std::string &reason)
 {
-    mCksumMetaResult = "skipped";
+    mCksumMetaResult = "dst_missing";
     mCksumMetaDetails.push_back(reason);
 }
 
@@ -769,16 +769,14 @@ void CPFilePair::FlushCksumResult()
     if (!mReporter)
         return;
 
-    // Derive combined result:
-    // - mismatch wins (any dimension mismatched → overall mismatch)
-    // - if both content and meta are skipped → skipped (e.g. dst_missing)
-    // - content="skipped" with meta=match → match (symlink/dir: content N/A)
-    // - otherwise match
+    // Derive combined result: only "match" or "mismatch"
+    // - dst_missing on either dimension → mismatch
+    // - mismatch on either dimension → mismatch
+    // - otherwise → match (including "not_applicable" which means N/A, not a problem)
     std::string combinedResult;
-    if (mCksumContentResult == "mismatch" || mCksumMetaResult == "mismatch")
+    if (mCksumContentResult == "mismatch" || mCksumContentResult == "dst_missing" ||
+        mCksumMetaResult == "mismatch" || mCksumMetaResult == "dst_missing")
         combinedResult = "mismatch";
-    else if (mCksumContentResult == "skipped" && mCksumMetaResult == "skipped")
-        combinedResult = "skipped";
     else
         combinedResult = "match";
 
@@ -796,7 +794,7 @@ tl::expected<void, StackError> CPFilePair::CompareMetadata()
     struct stat dstStat;
     if (lstat(mDstPath.c_str(), &dstStat) < 0)
     {
-        RecordCksumMetaSkipped("dst_stat_failed");
+        RecordCksumMetaDstMissing("dst_stat_failed");
         return tl::unexpected(StackError("lstat dst failed", errno));
     }
 

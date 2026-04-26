@@ -306,8 +306,8 @@ TEST_CASE("CksumOnly emits skipped when dst missing", "[integration][cksum]")
     std::string output = capture.str();
     REQUIRE(rc == 0);
 
-    REQUIRE(has_event_with(output, "cksum_result", "result", "skipped"));
-    REQUIRE(has_event_with(output, "cksum_result", "content", "skipped"));
+    REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
+    REQUIRE(has_event_with(output, "cksum_result", "content", "dst_missing"));
     // CksumOnly filter suppresses per-file I/O events like file_complete
     REQUIRE_FALSE(has_event(output, "file_complete"));
 

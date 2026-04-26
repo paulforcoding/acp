@@ -143,9 +143,9 @@ public:
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
 
-    void RecordCksumContent(const std::string &result, const std::string &reason);
+    void RecordCksumContent(const std::string &contentValue);
     void RecordCksumMetaMismatch(const std::string &reason, const std::string &detail = "");
-    void RecordCksumMetaSkipped(const std::string &reason);
+    void RecordCksumMetaDstMissing(const std::string &reason);
     void RecordCksumMetaMatch();
     void FlushCksumResult();
     const std::string &GetCksumContentResult() const { return mCksumContentResult; }
@@ -1205,7 +1205,7 @@ protected:
                                    slot->GetCPFPPtr()->GetSrcPath(),
                                    slot->GetCPFPPtr()->GetDstPath());
                     ioSlot->GetCPFPPtr()->SetCksumError(true);
-                    ioSlot->GetCPFPPtr()->RecordCksumContent("mismatch", "content_mismatch");
+                    ioSlot->GetCPFPPtr()->RecordCksumContent("mismatch");
                 }
 
                 if (ioSlot->GetCPFPPtr()->GetCksumError())
