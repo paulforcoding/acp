@@ -41,7 +41,7 @@ struct RWCombinedCopyOptions
     std::string ProgramLogMode = "console";
     std::string ProgramLogFilePath = "/tmp/acp_program.log";
     bool FileLogEnabled = false;
-    std::string FileLogMode = "file";
+    std::string FileLogMode = "console";
     int FileLogIntervalSec = 5;
     std::string FileLogPath = "/tmp/acp_file_info.json";
     std::string CopyEngine = "liburing";
