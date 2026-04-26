@@ -275,6 +275,98 @@ TEST_CASE("CksumOnly emits skipped when dst missing", "[integration][cksum]")
     fs::remove_all(dst_dir, ec);
 }
 
+TEST_CASE("CksumOnly does block-level checksum even when size/mtime match", "[integration][cksum]")
+{
+    // Verify that CksumOnly does NOT skip block-level checksum based on
+    // size/mtime alone.  We create identical files via CopyOnly, then
+    // corrupt a single byte in the dst (preserving size), and finally
+    // restore the original mtime on the dst so that size + mtime match.
+    // If CksumOnly incorrectly used the size/mtime fast-path, it would
+    // report "match" without ever reading file data.
+
+    fs::path src_dir = fs::path("testdata") / "cksum_only_content_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_cksum_only_content_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    const size_t file_size = 65536;
+    write_file_exact(src_dir / "content.dat", file_size, 'G');
+
+    // Step 1: CopyOnly to create an identical destination
+    {
+        auto copy_opts = make_cksum_options();
+        copy_opts.CopyMode = "CopyOnly";
+        copy_opts.PreserveMeta = true;
+        auto copy_logger = InitLogger(copy_opts);
+        int rc = CopyDir(src_dir, dst_dir, copy_opts, copy_logger);
+        REQUIRE(rc == 0);
+    }
+
+    // Step 2: Corrupt one byte in the destination (size unchanged)
+    {
+        std::fstream fdst(dst_dir / "content.dat", std::ios::in | std::ios::out | std::ios::binary);
+        REQUIRE(fdst.good());
+        char bad = 'Z';
+        fdst.seekp(100);
+        fdst.write(&bad, 1);
+    }
+
+    // Step 3: Restore the original mtime so size + mtime match src
+    {
+        struct stat src_stat;
+        REQUIRE(lstat((src_dir / "content.dat").c_str(), &src_stat) == 0);
+        struct timespec ts[2];
+#ifdef __APPLE__
+        ts[0] = src_stat.st_atimespec;
+        ts[1] = src_stat.st_mtimespec;
+#else
+        ts[0] = src_stat.st_atim;
+        ts[1] = src_stat.st_mtim;
+#endif
+        REQUIRE(utimensat(AT_FDCWD, (dst_dir / "content.dat").c_str(), ts, 0) == 0);
+    }
+
+    // Verify files are indeed different in content but same in size/mtime
+    REQUIRE_FALSE(files_equal(src_dir / "content.dat", dst_dir / "content.dat"));
+    {
+        struct stat src_st, dst_st;
+        REQUIRE(lstat((src_dir / "content.dat").c_str(), &src_st) == 0);
+        REQUIRE(lstat((dst_dir / "content.dat").c_str(), &dst_st) == 0);
+        REQUIRE(src_st.st_size == dst_st.st_size);
+#ifdef __APPLE__
+        REQUIRE(src_st.st_mtimespec.tv_sec == dst_st.st_mtimespec.tv_sec);
+        REQUIRE(src_st.st_mtimespec.tv_nsec == dst_st.st_mtimespec.tv_nsec);
+#else
+        REQUIRE(src_st.st_mtim.tv_sec == dst_st.st_mtim.tv_sec);
+        REQUIRE(src_st.st_mtim.tv_nsec == dst_st.st_mtim.tv_nsec);
+#endif
+    }
+
+    // Step 4: Run CksumOnly — block-level checksum must be performed despite
+    // size/mtime matching, and the result must appear in FileLog.
+    auto options = make_cksum_options();
+    options.CopyMode = "CksumOnly";
+    options.PreserveMeta = true;
+    auto logger = InitLogger(options);
+
+    StdoutCapture capture;
+    int rc = CopyDir(src_dir, dst_dir, options, logger);
+    std::string output = capture.str();
+    REQUIRE(rc == 0);
+
+    // CksumOnly must NOT report "size_mtime_match" —
+    // that fast-path is CksumCopy-only (guarded by !mCksumOnly).
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "size_mtime_match"));
+
+    // Block-level checksum must detect the content mismatch and emit it to FileLog.
+    REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
+    REQUIRE(has_event_with(output, "cksum_result", "reason", "content_mismatch"));
+
+    std::error_code ec;
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
+
 TEST_CASE("CksumOnly emits mismatch when mode differs", "[integration][cksum]")
 {
     fs::path src_dir = fs::path("testdata") / "cksum_only_mode_src";

@@ -143,6 +143,11 @@ public:
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
 
+    void EmitCksumResult(const std::string &result,
+                         const std::string &reason,
+                         size_t offset = 0,
+                         const std::string &detail = "");
+
     int64_t GetElapsedMs() const
     {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -200,10 +205,6 @@ private:
     tl::expected<void, StackError> CompareTimestamps(const struct stat &dstStat);
     tl::expected<void, StackError> CompareXattr(const struct stat &dstStat);
     tl::expected<void, StackError> CompareAcl(const struct stat &dstStat);
-    void EmitCksumResult(const std::string &result,
-                         const std::string &reason,
-                         size_t offset = 0,
-                         const std::string &detail = "");
 };
 
 // Helper: check if a buffer is entirely zero bytes (used by sparse copy).
@@ -1199,6 +1200,7 @@ protected:
                                    slot->GetCPFPPtr()->GetSrcPath(),
                                    slot->GetCPFPPtr()->GetDstPath());
                     ioSlot->GetCPFPPtr()->SetCksumError(true);
+                    ioSlot->GetCPFPPtr()->EmitCksumResult("mismatch", "content_mismatch", offset);
                 }
 
                 if (ioSlot->GetCPFPPtr()->GetCksumError())

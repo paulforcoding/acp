@@ -448,6 +448,14 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
         {
             if (mOptions.CopyMode == "CksumOnly")
             {
+                // Emit block-level checksum result for CksumOnly:
+                // - If block checksum was performed and all blocks matched, emit content_match.
+                // - If block checksum was skipped (symlink/dir/dst_missing), skip this.
+                // - Mismatches are already emitted per-block in HandleReadCompletion.
+                if (!pFP->IsSkipBlockCksum() && !pFP->GetCksumError())
+                {
+                    pFP->EmitCksumResult("match", "content_match");
+                }
                 auto diff_res = pFP->CompareMetadata();
                 if (!diff_res)
                 {
