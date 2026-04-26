@@ -234,12 +234,17 @@ public:
         if (!mEnabled)
             return;
 
+        auto now = std::chrono::steady_clock::now();
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - mLastStateSnapshotTime).count();
+        if (elapsed < mIntervalSec)
+            return;
+        mLastStateSnapshotTime = now;
+
         size_t total = mFilesTotal.load(std::memory_order_relaxed);
         size_t done = mFilesDone.load(std::memory_order_relaxed);
         size_t bytesTotal = mBytesTotal.load(std::memory_order_relaxed);
         size_t bytesDone = mBytesDone.load(std::memory_order_relaxed);
 
-        auto now = std::chrono::steady_clock::now();
         auto wallMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - mStartTime).count();
         double speedMbps = wallMs > 0 ? static_cast<double>(bytesDone) / 1024.0 / 1024.0 / (static_cast<double>(wallMs) / 1000.0) : 0.0;
 
@@ -367,6 +372,7 @@ private:
     bool mCksumOnlyFilter;
     std::chrono::steady_clock::time_point mStartTime;
     std::chrono::steady_clock::time_point mLastSummaryTime;
+    std::chrono::steady_clock::time_point mLastStateSnapshotTime;
     std::string mStartIsoTime{CurrentIsoTimestamp()};
 
     std::atomic<size_t> mFilesTotal{0};
