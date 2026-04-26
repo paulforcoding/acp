@@ -640,8 +640,8 @@ public:
                     mLogger->warn("RunQueue: exiting at round={}, channel closed and no work", round);
                     break;
                 }
-                // Only dump detailed state periodically to reduce log noise
-                if (round % 10 == 0)
+                // Dump state periodically; use warn for first idle round to capture early state
+                if (round % 10 == 0 || round == 0)
                 {
                     mLogger->warn("RunQueue: idle at round={}, pending={}, inflight={}, cksum_queue={}, closed={}",
                                    round, mCPFPMgr->PendingCount(), mCPFPMgr->InflightCount(),

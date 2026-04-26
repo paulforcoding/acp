@@ -61,9 +61,14 @@ public:
     }
     // Close 语义：关闭后 Pop 返回空 expected（Channel is closed），Push 抛出异常。
     // 设计意图：让消费者优雅退出，同时阻止新数据流入。
+    // 必须持有 mMutex 再 set flag + notify，否则 Pop 可能在 predicate check 与 wait 之间
+    // 错过 notify，导致永久阻塞（lost wakeup）。
     void Close()
     {
-        mDone.test_and_set();
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            mDone.test_and_set();
+        }
         mCondVar.notify_one();
     }
 
@@ -137,9 +142,13 @@ public:
     {
         return mDone.test();
     }
+    // 同 Channel::Close()，必须持锁再 notify 防止 lost wakeup
     void Close()
     {
-        mDone.test_and_set();
+        {
+            std::lock_guard<std::mutex> lock(mMutex);
+            mDone.test_and_set();
+        }
         mCondVar.notify_one();
     }
     // Push with deduplication, ignore queue size limit, and won't block
