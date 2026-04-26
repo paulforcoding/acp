@@ -1,5 +1,6 @@
 #include "lib/mainlib.hpp"
 #include "lib/thirdparty/catch2/catch_amalgamated.hpp"
+#include "test_run_logger.hpp"
 #include <filesystem>
 #include <fstream>
 #include <unistd.h>
@@ -131,9 +132,10 @@ static bool has_cksum_meta_detail(const std::string &output, const std::string &
 static RWCombinedCopyOptions make_test_options()
 {
     RWCombinedCopyOptions options;
-    options.ProgramLogLevel = "error";
+    options.ProgramLogLevel = "debug";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";
+    options.IOStuckTimeout = 10;
 #ifdef __APPLE__
     options.CopyEngine = "gcd";
 #else
