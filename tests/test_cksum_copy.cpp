@@ -60,7 +60,12 @@ static RWCombinedCopyOptions make_cksum_options()
     options.ProgramLogLevel = "error";
     options.ProgramLogMode = "file";
     options.ProgramLogFilePath = "/tmp/acp_program.log";
-    options.CopyEngine = "libaio";
+    options.CopyEngine =
+#ifdef __APPLE__
+        "gcd";
+#else
+        "libaio";
+#endif
     options.CopyMode = "CksumCopy";
     options.CksumAlgorithm = "xxhash64";
     options.CopyParallelism = 1;
@@ -119,8 +124,6 @@ static bool has_event_with(const std::string &output,
     return false;
 }
 
-#ifndef __APPLE__
-// CksumCopy integration tests require libaio backend, not available on macOS
 TEST_CASE("CksumCopy partial last block", "[integration][cksum]")
 {
     fs::path src_dir = fs::path("testdata") / "cksum_src";
@@ -226,10 +229,10 @@ TEST_CASE("CksumCopy truncates dst when src is smaller", "[integration][cksum]")
     REQUIRE(fs::file_size(dst_dir / "trunc.dat") == 12);
     REQUIRE(files_equal(src_dir / "trunc.dat", dst_dir / "trunc.dat"));
 
+    std::error_code ec;
     fs::remove_all(src_dir, ec);
     fs::remove_all(dst_dir, ec);
 }
-#endif
 
 TEST_CASE("CksumOnly emits FileLog cksum_result match events", "[integration][cksum]")
 {
