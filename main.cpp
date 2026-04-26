@@ -92,6 +92,8 @@ static void PrintHelp(const char* /*program_name*/)
         "```\n"
         "\n"
         "校验源与目标的差异，仅写入差异数据。当 size+mtime 一致时快速跳过，仅对不一致的文件做逐块校验。\n"
+        "注意：快速跳过仅检查 size+mtime，不检测权限/属主/xattr/ACL 等其他元数据差异。\n"
+        "如需检测元数据差异，请使用 CksumOnly 模式。\n"
         "源和目标必须同为文件或同为目录，且必须都存在。\n"
         "路径语义：`acp <src> <dst>` 校验并复制 `<src>` 与 `<dst>`，而非 `<dst>/<src>`。\n"
         "\n"
@@ -127,7 +129,7 @@ static void PrintHelp(const char* /*program_name*/)
         "## 日志\n"
         "\n"
         "- **ProgramLog**：程序运行状态日志，可设为 console 或 file\n"
-        "- **FileLog**：文件复制/校验结果日志，可设为 console 或 file。CksumOnly 模式自动启用。\n"
+        "- **FileLog**：文件复制/校验结果日志，可设为 console 或 file。CksumOnly / CksumCopy 模式自动启用。\n"
         "\n"
         "使用 `acp --help-all` 查看完整的功能场景、日志系统和使用场景说明。\n"
         "\n"
@@ -160,7 +162,7 @@ acp 支持三种功能场景，由 `CopyMode` 配置项决定：
 |------|-------------|------|
 | 全量复制 | `CopyOnly` | 从源读取并写入目标，行为与 `cp` 类似 |
 | 数据校验 | `CksumOnly` | 校验源与目标的差异，不写入，始终逐块校验（不做 mtime+size 快速跳过），结果记录到 FileLog（自动启用） |
-| 增量复制 | `CksumCopy` | 校验源与目标的差异，仅写入差异数据（mtime+size 一致时快速跳过，仅对不一致文件逐块校验），校验结果记录到 FileLog（自动启用） |
+| 增量复制 | `CksumCopy` | 校验源与目标的差异，仅写入差异数据（mtime+size 一致时快速跳过，仅对不一致文件逐块校验；快速跳过不检测权限/属主/xattr/ACL 等元数据差异），校验结果记录到 FileLog（自动启用） |
 
 ### 1.1 全量复制（CopyOnly）
 
@@ -215,6 +217,7 @@ acp <src> <dst>
 - 源端和目标端必须同时为目录或同时为文件，且必须都存在。
 - 路径语义与全量复制不同：`acp <src> <dst>` 校验并复制差异数据的是 `<src>` 与 `<dst>` 的对应关系，**不是** `<src>` 与 `<dst>/<src>` 的对应关系。
 - 当源和目标的 size+mtime 一致时，快速跳过不做逐块校验。仅对 size 或 mtime 不一致的文件做逐块校验并写入差异数据。这在大多数场景下能大幅减少 I/O，但若 mtime 被人为恢复或碰巧一致，可能漏检内容差异。
+- 快速跳过**仅检查 size+mtime**，不检测权限、属主、xattr、ACL 等其他元数据差异。即使权限或属主不同，只要 size+mtime 一致，CksumCopy 仍会跳过。如需检测元数据差异，请使用 CksumOnly 模式。
 
 **ProgramLog：** 与全量复制相同。
 
