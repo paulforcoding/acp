@@ -267,8 +267,8 @@ TEST_CASE("CksumOnly emits skipped when dst missing", "[integration][cksum]")
 
     REQUIRE(has_event_with(output, "cksum_result", "result", "skipped"));
     REQUIRE(has_event_with(output, "cksum_result", "reason", "dst_missing"));
-    // FileComplete should still be emitted
-    REQUIRE(has_event(output, "file_complete"));
+    // CksumOnly filter suppresses per-file I/O events like file_complete
+    REQUIRE_FALSE(has_event(output, "file_complete"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
