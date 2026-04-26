@@ -291,7 +291,8 @@ int CopyDir(const fs::path src_p, const fs::path dst_p, const RWCombinedCopyOpti
     // 构造核心对象并注入依赖：Channel 作为扫描线程与复制线程间的有界队列，FileLogReporter 用于结构化进度输出
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath,
+                                                       options.CopyMode == "CksumOnly");
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     std::atomic<bool> copyFailed{false};
@@ -423,7 +424,8 @@ int CopyFile(const fs::path src_file, const fs::path dst_file, const RWCombinedC
 #endif
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
-    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
+    auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode, options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath,
+                                                       options.CopyMode == "CksumOnly");
     auto file_copier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     // 预收集文件信息用于 CopyPlan 报告：单文件场景下总量固定，提前设置避免运行时统计
@@ -499,7 +501,8 @@ int CopyBatch(const std::vector<std::pair<fs::path, fs::path>> &srcDstPairs,
     Channel<CopyEntry> copyChannel(options.CopyChanSize);
     auto funcDurationStat = std::make_shared<FuncDurationStat>(logger);
     auto reporter = std::make_unique<FileLogReporter>(options.FileLogEnabled, options.FileLogMode,
-                                                      options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath);
+                                                      options.FileLogIntervalSec, options.FileLogPath, options.FileLogPath,
+                                                      options.CopyMode == "CksumOnly");
     auto fileCopier = std::make_unique<CopyEngine>(options, logger, funcDurationStat, reporter.get());
 
     std::atomic<bool> copyFailed{false};

@@ -58,39 +58,411 @@ static void PrintVersion()
         "\n";
 }
 
-static void PrintHelp(const char *program_name)
+static void PrintHelp(const char* /*program_name*/)
 {
     std::cout <<
-        "acp — async cp, high-performance file copy for Linux/macOS\n"
+        "# acp — async cp = agent cp\n"
         "\n"
-        "USAGE\n"
-        "    " << program_name << " [OPTIONS] <src_path>... <dst_path>\n"
+        "High-performance async file copy for Linux/macOS.\n"
         "\n"
-        "POSITIONAL ARGUMENTS\n"
-        "    src_path    One or more source paths (regular files or directories)\n"
-        "    dst_path    Destination path (regular file or directory)\n"
+        "## 功能场景\n"
         "\n"
-        "    Single source:\n"
-        "        src may be a file or directory.\n"
-        "        dst may be a non-existing path (created), an existing file\n"
-        "        (overwritten), or an existing directory (copied inside).\n"
+        "### 全量复制 (CopyOnly)\n"
         "\n"
-        "    Multiple sources:\n"
-        "        All sources are copied into dst, which must be an existing directory.\n"
+        "```\n"
+        "acp [OPTIONS] <src>... <dst>\n"
+        "```\n"
         "\n"
-        "CONFIG LOADING ORDER (later overrides earlier)\n"
-        "    1. Built-in defaults\n"
-        "    2. /etc/acp_config.json\n"
-        "    3. ~/acp_config.json\n"
-        "    4. ./acp_config.json\n"
-        "    5. Command-line options\n"
+        "将源复制到目标。行为与 `cp` 类似。支持多源复制和 inotify 持续监控。\n"
         "\n"
-        "    Use --help-all to see all available command-line options.\n"
+        "### 数据校验 (CksumOnly)\n"
         "\n"
-        "EXIT CODES\n"
-        "    0   Success\n"
-        "    1   Configuration error, path error, or copy failure\n"
-        "─────────────────────────────────────────────────────────────────────────\n";
+        "```\n"
+        "acp --mode=CksumOnly <src> <dst>\n"
+        "```\n"
+        "\n"
+        "校验源与目标的数据差异，不执行写入。源和目标必须同为文件或同为目录，且必须都存在。\n"
+        "路径语义：`acp <src> <dst>` 校验 `<src>` 与 `<dst>`，而非 `<dst>/<src>`。\n"
+        "\n"
+        "### 增量复制 (CksumCopy)\n"
+        "\n"
+        "```\n"
+        "acp --mode=CksumCopy <src> <dst>\n"
+        "```\n"
+        "\n"
+        "校验源与目标的差异，仅写入差异数据。源和目标必须同为文件或同为目录，且必须都存在。\n"
+        "路径语义：`acp <src> <dst>` 校验并复制 `<src>` 与 `<dst>`，而非 `<dst>/<src>`。\n"
+        "\n"
+        "## 使用场景\n"
+        "\n"
+        "| 场景 | 特点 | 推荐 CopyMode |\n"
+        "|------|------|----------------|\n"
+        "| 个人日常 | 安静输出，行为贴近 `cp` | CopyOnly |\n"
+        "| 企业数据迁移 | 结构化日志，进度可观测 | CopyOnly 或 CksumCopy |\n"
+        "\n"
+        "## 使用例子\n"
+        "\n"
+        "```bash\n"
+        "# 复制文件\n"
+        "acp file.txt /backup/file.txt\n"
+        "\n"
+        "# 复制目录\n"
+        "acp mydir/ /backup/\n"
+        "\n"
+        "# 多源复制\n"
+        "acp a.txt b.txt /backup/\n"
+        "\n"
+        "# 校验两个目录的数据差异\n"
+        "acp --mode=CksumOnly /data/ /backup/\n"
+        "\n"
+        "# 增量复制（仅写入差异数据）\n"
+        "acp --mode=CksumCopy /data/ /backup/\n"
+        "\n"
+        "# 预览当前生效的配置，不执行复制\n"
+        "acp --dry-run /data/ /backup/\n"
+        "```\n"
+        "\n"
+        "## 日志\n"
+        "\n"
+        "- **ProgramLog**：程序运行状态日志，可设为 console 或 file\n"
+        "- **FileLog**：文件复制/校验结果日志，可设为 console 或 file\n"
+        "\n"
+        "使用 `acp --help-all` 查看完整的功能场景、日志系统和使用场景说明。\n"
+        "\n"
+        "## 配置加载顺序（后者覆盖前者）\n"
+        "\n"
+        "1. 内置默认值\n"
+        "2. `/etc/acp_config.json`\n"
+        "3. `~/acp_config.json`\n"
+        "4. `./acp_config.json`\n"
+        "5. 命令行参数\n"
+        "\n"
+        "## 退出码\n"
+        "\n"
+        "| 码 | 含义 |\n"
+        "|----|------|\n"
+        "| 0  | 成功 |\n"
+        "| 1  | 配置错误、路径错误或复制失败 |\n";
+}
+
+static void PrintHelpAllDesignDoc()
+{
+    std::cout << R"HELPALL(
+# acp 用户体验优化设计
+
+> 不改动核心 I/O 复制逻辑，通过调整功能场景、日志输出和命令行交互，提升用户友好性。
+
+---
+
+## 1. 功能场景
+
+acp 支持三种功能场景，由 `CopyMode` 配置项决定：
+
+| 场景 | CopyMode 值 | 说明 |
+|------|-------------|------|
+| 全量复制 | `CopyOnly` | 从源读取并写入目标，行为与 `cp` 类似 |
+| 数据校验 | `CksumOnly` | 校验源与目标的差异，不写入，结果记录到 FileLog |
+| 增量复制 | `CksumCopy` | 校验源与目标的差异，仅写入差异数据 |
+
+### 1.1 全量复制（CopyOnly）
+
+**命令行用法：** 与当前保持不变。
+
+```
+acp <src>... <dst>
+```
+
+**路径语义：** 与当前保持不变 — `acp <src> <dst>` 将 `<src>` 复制到 `<dst>/<src>`。
+
+**ProgramLog：** 当前行为保持不变。
+
+**FileLog：** 当前行为保持不变。
+
+**EnableInotify：** 支持。
+
+**多源复制：** 支持。
+
+### 1.2 数据校验（CksumOnly）
+
+**命令行用法：**
+
+```
+acp <src> <dst>
+```
+
+约束：
+
+- 源端和目标端必须同时为目录或同时为文件，且必须都存在。
+- 路径语义与全量复制不同：`acp <src> <dst>` 校验的是 `<src>` 与 `<dst>` 的对应关系，**不是** `<src>` 与 `<dst>/<src>` 的对应关系。
+
+**ProgramLog：** 与全量复制相同。
+
+**FileLog：** 仅输出文件对比结果事件和校验进度性能事件，其他事件不输出。
+
+**EnableInotify：** 不支持。
+
+**多源数据校验：** 不支持。
+
+### 1.3 增量复制（CksumCopy）
+
+**命令行用法：**
+
+```
+acp <src> <dst>
+```
+
+约束：
+
+- 源端和目标端必须同时为目录或同时为文件，且必须都存在。
+- 路径语义与全量复制不同：`acp <src> <dst>` 校验并复制差异数据的是 `<src>` 与 `<dst>` 的对应关系，**不是** `<src>` 与 `<dst>/<src>` 的对应关系。
+
+**ProgramLog：** 与全量复制相同。
+
+**FileLog：** 保持当前行为。
+
+**EnableInotify：** 不支持。
+
+**多源增量复制：** 不支持。
+
+---
+
+## 2. 日志系统
+
+acp 有两套日志系统：
+
+| 日志 | 用途 | 输出内容 |
+|------|------|----------|
+| **ProgramLog** | 程序自身运行状态 | 程序启动、配置加载、错误等 |
+| **FileLog** | 文件复制/校验状态 | 文件复制结果、校验结果、进度性能 |
+
+两种日志均可设置输出为 `console` 或 `file`（可指定路径），具体设置方法见 `acp --help-all`。
+
+---
+
+## 3. 使用场景与配置示例
+
+### 3.1 个人日常使用
+
+```json
+{
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "console",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": false,
+  "FileLogMode": "file",
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "/tmp/acp_file_info.json",
+  "CopyEngine": "liburing",
+  "CopyMode": "CopyOnly",
+  "CksumAlgorithm": "xxhash64",
+  "CopyParallelism": 1,
+  "CopyChanSize": 100,
+  "EnableInotify": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
+  "DirectIO": false,
+  "SyncWrites": true,
+  "CopyOptions": {
+    "IOSize": 131072,
+    "QueueDepth": 8,
+    "Batch": 8,
+    "IOReapWait": 1
+  }
+}
+```
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| ProgramLogLevel | `error` | 一般人对复制过程不感兴趣 |
+| ProgramLogMode | `console` | 有报错直接输出，和 `cp` 行为一致 |
+| FileLogEnabled | `false` | 无输出即表示全部复制成功，和 `cp` 行为一致；AI agent 运行时设为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，可在复制过程中查询进度 |
+| CopyEngine | `liburing` / `libaio` | Linux 选 `liburing` 或 `libaio`，macOS 只能选 `GCD` |
+| CksumAlgorithm | `xxhash64` | 默认即可 |
+| CopyParallelism | `1` | 单线程异步复制已足够快 |
+| CopyChanSize | `100` | 无需占用过多系统资源 |
+| EnableInotify | `false` | 和 `cp` 行为一致 |
+| PreserveSparseFiles | `true` | 和 `cp` 行为一致 |
+| PreserveMeta | `true` | 和 `cp` 行为一致 |
+| DirectIO | `false` | 和 `cp` 行为一致 |
+| SyncWrites | `true` | 与 `cp` 不同：acp 默认 `fsync()`，降低数据丢失风险 |
+| IOSize × QueueDepth | 128KB × 8 | 总缓冲 1MB，按内存大小可适当增大，不超过内存容量 |
+| Batch | `8` | 每批 IO 提交数量，对性能影响不大 |
+| IOReapWait | `1` | 一般无需调整 |
+
+### 3.2 企业数据迁移
+
+```json
+{
+  "ProgramLogLevel": "error",
+  "ProgramLogMode": "file",
+  "ProgramLogFilePath": "/tmp/acp_program.log",
+  "FileLogEnabled": true,
+  "FileLogMode": "file",
+  "FileLogIntervalSec": 5,
+  "FileLogPath": "/tmp/acp_file_info.json",
+  "CopyEngine": "liburing",
+  "CopyMode": "CopyOnly",
+  "CksumAlgorithm": "xxhash64",
+  "CopyParallelism": 1,
+  "CopyChanSize": 1000,
+  "EnableInotify": false,
+  "PreserveSparseFiles": true,
+  "PreserveMeta": true,
+  "DirectIO": false,
+  "SyncWrites": true,
+  "CopyOptions": {
+    "IOSize": 262144,
+    "QueueDepth": 32,
+    "Batch": 8,
+    "IOReapWait": 1
+  }
+}
+```
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| ProgramLogLevel | `error` | 同上 |
+| ProgramLogMode | `file` | 保留日志供运维人员排查 |
+| FileLogEnabled | `true` | 设置为 `true`，配合 `FileLogMode: "file"` 和 `FileLogPath`，复制前清除文件，复制中可查询进度 |
+| CopyEngine | `liburing` / `libaio` | Linux 选 `liburing` 或 `libaio`，macOS 只能选 `GCD` |
+| CksumAlgorithm | `xxhash64` | 默认即可 |
+| CopyParallelism | `1`–`8` | 异步复制 1 通常够快；性能峰值一般在 1–8 之间，过大收益递减 |
+| CopyChanSize | `1000+` | 建议更大 |
+| EnableInotify | 视需求 | 根据是否需要持续复制而定 |
+| PreserveSparseFiles | `true` | 和 `cp` 行为一致 |
+| PreserveMeta | `true` | 和 `cp` 行为一致；去掉可加快复制 |
+| DirectIO | `false` / `true` | 某些介质/文件系统开启 `DirectIO` 性能更好；与 `SyncWrites` 互斥，二选一为 `true` |
+| SyncWrites | `false` / `true` | 与 `DirectIO` 互斥，二选一为 `true` |
+| IOSize × QueueDepth | 256KB × 32 | 总缓冲 8MB，可按可用内存增大 |
+| Batch | `8` | 同上 |
+| IOReapWait | `1` | 同上 |
+)HELPALL";
+}
+
+struct CliOptions {
+    std::optional<std::string> optLogLevel, optLogMode, optLogFile;
+    std::optional<std::string> optFileLogMode, optFileLogPath;
+    std::optional<std::string> optEngine, optMode, optCksumAlgo;
+    std::optional<int> optFileLogInterval, optParallelism, optChanSize;
+    std::optional<size_t> optIoSize, optQueueDepth;
+    std::optional<int> optBatch, optIoReapWait, optIoStuckTimeout;
+    bool enableFileLog = false, disableFileLog = false;
+    bool enableInotify = false, disableInotify = false;
+    bool enableSparse = false, disableSparse = false;
+    bool enablePreserveMeta = false, disablePreserveMeta = false;
+    bool enableDirectIO = false, disableDirectIO = false;
+    bool enableSync = false, disableSync = false;
+    bool dryRun = false;
+    std::vector<std::string> positional;
+};
+
+static void SetupCliOptions(CLI::App& app, CliOptions& opts)
+{
+    app.add_option("--log-level,-L", opts.optLogLevel, "Program log level (trace/debug/info/warn/error/critical)");
+    app.add_option("--log-mode", opts.optLogMode, "Program log mode (console/file)");
+    app.add_option("--log-file", opts.optLogFile, "Program log file path");
+    app.add_option("--file-log-mode", opts.optFileLogMode, "File log mode (console/file)");
+    app.add_option("--file-log-path", opts.optFileLogPath, "File log output path");
+    app.add_option("--engine,-e", opts.optEngine, "Copy engine (libaio/liburing)")
+        ->check(CLI::IsMember({"libaio", "liburing", "gcd"}));
+    app.add_option("--mode,-m", opts.optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)")
+        ->check(CLI::IsMember({"CopyOnly", "CksumCopy", "CksumOnly"}));
+    app.add_option("--cksum-algo,-a", opts.optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)")
+        ->check(CLI::IsMember({"xxhash64", "md5", "sha256"}));
+
+    app.add_option("--file-log-interval", opts.optFileLogInterval, "File log flush interval (sec)")->check(CLI::PositiveNumber);
+    app.add_option("--parallelism,-p", opts.optParallelism, "Number of copy worker threads")->check(CLI::PositiveNumber);
+    app.add_option("--chan-size", opts.optChanSize, "Channel capacity for file dispatch")->check(CLI::PositiveNumber);
+    app.add_option("--io-size", opts.optIoSize, "I/O unit size in bytes")->check(CLI::PositiveNumber);
+    app.add_option("--queue-depth,-q", opts.optQueueDepth, "Max in-flight I/Os per worker")->check(CLI::PositiveNumber);
+    app.add_option("--batch,-b", opts.optBatch, "I/Os submitted per batch")->check(CLI::PositiveNumber);
+    app.add_option("--io-reap-wait,-w", opts.optIoReapWait, "I/O completion wait timeout (sec)")->check(CLI::PositiveNumber);
+    app.add_option("--io-stuck-timeout,-t", opts.optIoStuckTimeout, "Stuck I/O detection timeout (sec, 0=off)")->check(CLI::NonNegativeNumber);
+
+    app.add_flag("--enable-file-log", opts.enableFileLog, "Enable file-level NDJSON logging");
+    app.add_flag("--disable-file-log", opts.disableFileLog, "Disable file-level NDJSON logging");
+    app.add_flag("--enable-inotify", opts.enableInotify, "Enable source directory monitoring");
+    app.add_flag("--disable-inotify", opts.disableInotify, "Disable source directory monitoring");
+    app.add_flag("--enable-sparse", opts.enableSparse, "Preserve sparse file holes");
+    app.add_flag("--disable-sparse", opts.disableSparse, "Do not preserve sparse file holes");
+    app.add_flag("--enable-preserve-meta", opts.enablePreserveMeta, "Preserve file metadata");
+    app.add_flag("--disable-preserve-meta", opts.disablePreserveMeta, "Do not preserve file metadata");
+    app.add_flag("--enable-direct-io", opts.enableDirectIO, "Use O_DIRECT for unbuffered I/O");
+    app.add_flag("--disable-direct-io", opts.disableDirectIO, "Use buffered I/O");
+    app.add_flag("--enable-sync", opts.enableSync, "Sync data to disk after each write");
+    app.add_flag("--disable-sync", opts.disableSync, "Do not force sync after writes");
+    app.add_flag("--dry-run", opts.dryRun, "Show effective config and mode without executing");
+
+    app.add_option("paths", opts.positional, "Source and destination paths")
+       ->required()
+       ->expected(-1);
+}
+
+static void PrintHelpAllCliOptions()
+{
+    CLI::App app{"acp — async cp, high-performance file copy"};
+    CliOptions opts;
+    SetupCliOptions(app, opts);
+    std::cout << "\n---\n\n# 命令行选项\n\n";
+    std::cout << app.help("", CLI::AppFormatMode::All) << std::endl;
+}
+
+static void PrintHelpAll()
+{
+    PrintHelpAllDesignDoc();
+    PrintHelpAllCliOptions();
+}
+
+static void PrintDryRun(const RWCombinedCopyOptions& options,
+                         const std::vector<std::string>& srcPaths,
+                         const std::string& dstPath)
+{
+    std::string modeDesc;
+    if (options.CopyMode == "CopyOnly")
+        modeDesc = "全量复制 (CopyOnly)";
+    else if (options.CopyMode == "CksumOnly")
+        modeDesc = "数据校验 (CksumOnly)";
+    else if (options.CopyMode == "CksumCopy")
+        modeDesc = "增量复制 (CksumCopy)";
+    else
+        modeDesc = "Unknown (" + options.CopyMode + ")";
+
+    std::cout <<
+        "## acp dry-run\n"
+        "\n"
+        "### 功能场景\n"
+        << modeDesc << "\n"
+        "\n"
+        "### 生效参数\n";
+
+    std::cout << "| 参数 | 值 |\n|------|----|\n";
+    std::cout << "| ProgramLogLevel | `" << options.ProgramLogLevel << "` |\n";
+    std::cout << "| ProgramLogMode | `" << options.ProgramLogMode << "` |\n";
+    std::cout << "| ProgramLogFilePath | `" << options.ProgramLogFilePath << "` |\n";
+    std::cout << "| FileLogEnabled | `" << (options.FileLogEnabled ? "true" : "false") << "` |\n";
+    std::cout << "| FileLogMode | `" << options.FileLogMode << "` |\n";
+    std::cout << "| FileLogIntervalSec | `" << options.FileLogIntervalSec << "` |\n";
+    std::cout << "| FileLogPath | `" << options.FileLogPath << "` |\n";
+    std::cout << "| CopyEngine | `" << options.CopyEngine << "` |\n";
+    std::cout << "| CopyMode | `" << options.CopyMode << "` |\n";
+    std::cout << "| CksumAlgorithm | `" << options.CksumAlgorithm << "` |\n";
+    std::cout << "| CopyParallelism | `" << options.CopyParallelism << "` |\n";
+    std::cout << "| CopyChanSize | `" << options.CopyChanSize << "` |\n";
+    std::cout << "| EnableInotify | `" << (options.EnableInotify ? "true" : "false") << "` |\n";
+    std::cout << "| PreserveSparseFiles | `" << (options.PreserveSparseFiles ? "true" : "false") << "` |\n";
+    std::cout << "| PreserveMeta | `" << (options.PreserveMeta ? "true" : "false") << "` |\n";
+    std::cout << "| DirectIO | `" << (options.DirectIO ? "true" : "false") << "` |\n";
+    std::cout << "| SyncWrites | `" << (options.SyncWrites ? "true" : "false") << "` |\n";
+    std::cout << "| IOSize | `" << options.IoSize << "` |\n";
+    std::cout << "| QueueDepth | `" << options.QueueDepth << "` |\n";
+    std::cout << "| Batch | `" << options.Batch << "` |\n";
+    std::cout << "| IOReapWait | `" << options.IOReapWait << "` |\n";
+    std::cout << "| IOStuckTimeout | `" << options.IOStuckTimeout << "` |\n";
+
+    std::cout << "\n### 源路径\n";
+    for (const auto& s : srcPaths)
+        std::cout << "- `" << s << "`\n";
+    std::cout << "\n### 目标路径\n- `" << dstPath << "`\n";
 }
 
 int main(int argc, char *argv[])
@@ -102,6 +474,11 @@ int main(int argc, char *argv[])
         PrintHelp(argv[0]);
         return 0;
     }
+    if (argc == 2 && std::strcmp(argv[1], "--help-all") == 0)
+    {
+        PrintHelpAll();
+        return 0;
+    }
     if (argc == 2 && (std::strcmp(argv[1], "--version") == 0 || std::strcmp(argv[1], "-v") == 0))
     {
         PrintVersion();
@@ -110,65 +487,8 @@ int main(int argc, char *argv[])
 
     // ---------- CLI11 参数定义：所有选项先收集到 optional，后续按优先级覆盖配置 ----------
     CLI::App app{"acp — async cp, high-performance file copy"};
-
-    std::optional<std::string> optLogLevel, optLogMode, optLogFile;
-    std::optional<std::string> optFileLogMode, optFileLogPath;
-    std::optional<std::string> optEngine, optMode, optCksumAlgo;
-    std::optional<int> optFileLogInterval, optParallelism, optChanSize;
-    std::optional<size_t> optIoSize, optQueueDepth;
-    std::optional<int> optBatch, optIoReapWait, optIoStuckTimeout;
-
-    bool enableFileLog = false, disableFileLog = false;
-    bool enableInotify = false, disableInotify = false;
-    bool enableSparse = false, disableSparse = false;
-    bool enablePreserveMeta = false, disablePreserveMeta = false;
-    bool enableDirectIO = false, disableDirectIO = false;
-    bool enableSync = false, disableSync = false;
-
-    // String options
-    app.add_option("--log-level,-L", optLogLevel, "Program log level (trace/debug/info/warn/error/critical)");
-    app.add_option("--log-mode", optLogMode, "Program log mode (console/file)");
-    app.add_option("--log-file", optLogFile, "Program log file path");
-    app.add_option("--file-log-mode", optFileLogMode, "File log mode (console/file)");
-    app.add_option("--file-log-path", optFileLogPath, "File log output path");
-    app.add_option("--engine,-e", optEngine, "Copy engine (libaio/liburing)")
-        ->check(CLI::IsMember({"libaio", "liburing", "gcd"}));
-    app.add_option("--mode,-m", optMode, "Copy mode (CopyOnly/CksumCopy/CksumOnly)")
-        ->check(CLI::IsMember({"CopyOnly", "CksumCopy", "CksumOnly"}));
-    app.add_option("--cksum-algo,-a", optCksumAlgo, "Checksum algorithm (xxhash64/md5/sha256)")
-        ->check(CLI::IsMember({"xxhash64", "md5", "sha256"}));
-
-    // Numeric options
-    app.add_option("--file-log-interval", optFileLogInterval, "File log flush interval (sec)")->check(CLI::PositiveNumber);
-    app.add_option("--parallelism,-p", optParallelism, "Number of copy worker threads")->check(CLI::PositiveNumber);
-    app.add_option("--chan-size", optChanSize, "Channel capacity for file dispatch")->check(CLI::PositiveNumber);
-    app.add_option("--io-size", optIoSize, "I/O unit size in bytes")->check(CLI::PositiveNumber);
-    app.add_option("--queue-depth,-q", optQueueDepth, "Max in-flight I/Os per worker")->check(CLI::PositiveNumber);
-    app.add_option("--batch,-b", optBatch, "I/Os submitted per batch")->check(CLI::PositiveNumber);
-    app.add_option("--io-reap-wait,-w", optIoReapWait, "I/O completion wait timeout (sec)")->check(CLI::PositiveNumber);
-    app.add_option("--io-stuck-timeout,-t", optIoStuckTimeout, "Stuck I/O detection timeout (sec, 0=off)")->check(CLI::NonNegativeNumber);
-
-    // Boolean flag pairs
-    app.add_flag("--enable-file-log", enableFileLog, "Enable file-level NDJSON logging");
-    app.add_flag("--disable-file-log", disableFileLog, "Disable file-level NDJSON logging");
-    app.add_flag("--enable-inotify", enableInotify, "Enable source directory monitoring");
-    app.add_flag("--disable-inotify", disableInotify, "Disable source directory monitoring");
-    app.add_flag("--enable-sparse", enableSparse, "Preserve sparse file holes");
-    app.add_flag("--disable-sparse", disableSparse, "Do not preserve sparse file holes");
-    app.add_flag("--enable-preserve-meta", enablePreserveMeta, "Preserve file metadata");
-    app.add_flag("--disable-preserve-meta", disablePreserveMeta, "Do not preserve file metadata");
-    app.add_flag("--enable-direct-io", enableDirectIO, "Use O_DIRECT for unbuffered I/O");
-    app.add_flag("--disable-direct-io", disableDirectIO, "Use buffered I/O");
-    app.add_flag("--enable-sync", enableSync, "Sync data to disk after each write");
-    app.add_flag("--disable-sync", disableSync, "Do not force sync after writes");
-
-    // Positional arguments
-    std::vector<std::string> positional;
-    app.add_option("paths", positional, "Source and destination paths")
-       ->required()
-       ->expected(-1);
-
-    app.set_help_all_flag("--help-all", "Show all help including configuration options");
+    CliOptions cliOpts;
+    SetupCliOptions(app, cliOpts);
     app.set_version_flag("--version,-v", kVersion);
 
     // ---------- 配置合并优先级：默认值 → /etc/acp_config.json → ~/acp_config.json → ./acp_config.json → CLI 参数 ----------
@@ -197,36 +517,36 @@ int main(int argc, char *argv[])
     }
 
     // ---------- 命令行参数覆盖配置文件（最高优先级） ----------
-    if (optLogLevel)        options.ProgramLogLevel = *optLogLevel;
-    if (optLogMode)         options.ProgramLogMode = *optLogMode;
-    if (optLogFile)         options.ProgramLogFilePath = *optLogFile;
-    if (optFileLogMode)     options.FileLogMode = *optFileLogMode;
-    if (optFileLogPath)     options.FileLogPath = *optFileLogPath;
-    if (optEngine)          options.CopyEngine = *optEngine;
-    if (optMode)            options.CopyMode = *optMode;
-    if (optCksumAlgo)       options.CksumAlgorithm = *optCksumAlgo;
+    if (cliOpts.optLogLevel)        options.ProgramLogLevel = *cliOpts.optLogLevel;
+    if (cliOpts.optLogMode)         options.ProgramLogMode = *cliOpts.optLogMode;
+    if (cliOpts.optLogFile)         options.ProgramLogFilePath = *cliOpts.optLogFile;
+    if (cliOpts.optFileLogMode)     options.FileLogMode = *cliOpts.optFileLogMode;
+    if (cliOpts.optFileLogPath)     options.FileLogPath = *cliOpts.optFileLogPath;
+    if (cliOpts.optEngine)          options.CopyEngine = *cliOpts.optEngine;
+    if (cliOpts.optMode)            options.CopyMode = *cliOpts.optMode;
+    if (cliOpts.optCksumAlgo)       options.CksumAlgorithm = *cliOpts.optCksumAlgo;
 
-    if (optFileLogInterval) options.FileLogIntervalSec = *optFileLogInterval;
-    if (optParallelism)     options.CopyParallelism = *optParallelism;
-    if (optChanSize)        options.CopyChanSize = *optChanSize;
-    if (optIoSize)          options.IoSize = *optIoSize;
-    if (optQueueDepth)      options.QueueDepth = *optQueueDepth;
-    if (optBatch)           options.Batch = *optBatch;
-    if (optIoReapWait)      options.IOReapWait = *optIoReapWait;
-    if (optIoStuckTimeout)  options.IOStuckTimeout = *optIoStuckTimeout;
+    if (cliOpts.optFileLogInterval) options.FileLogIntervalSec = *cliOpts.optFileLogInterval;
+    if (cliOpts.optParallelism)     options.CopyParallelism = *cliOpts.optParallelism;
+    if (cliOpts.optChanSize)        options.CopyChanSize = *cliOpts.optChanSize;
+    if (cliOpts.optIoSize)          options.IoSize = *cliOpts.optIoSize;
+    if (cliOpts.optQueueDepth)      options.QueueDepth = *cliOpts.optQueueDepth;
+    if (cliOpts.optBatch)           options.Batch = *cliOpts.optBatch;
+    if (cliOpts.optIoReapWait)      options.IOReapWait = *cliOpts.optIoReapWait;
+    if (cliOpts.optIoStuckTimeout)  options.IOStuckTimeout = *cliOpts.optIoStuckTimeout;
 
-    if (enableFileLog)      options.FileLogEnabled = true;
-    if (disableFileLog)     options.FileLogEnabled = false;
-    if (enableInotify)      options.EnableInotify = true;
-    if (disableInotify)     options.EnableInotify = false;
-    if (enableSparse)       options.PreserveSparseFiles = true;
-    if (disableSparse)      options.PreserveSparseFiles = false;
-    if (enablePreserveMeta) options.PreserveMeta = true;
-    if (disablePreserveMeta)options.PreserveMeta = false;
-    if (enableDirectIO)     options.DirectIO = true;
-    if (disableDirectIO)    options.DirectIO = false;
-    if (enableSync)         options.SyncWrites = true;
-    if (disableSync)        options.SyncWrites = false;
+    if (cliOpts.enableFileLog)      options.FileLogEnabled = true;
+    if (cliOpts.disableFileLog)     options.FileLogEnabled = false;
+    if (cliOpts.enableInotify)      options.EnableInotify = true;
+    if (cliOpts.disableInotify)     options.EnableInotify = false;
+    if (cliOpts.enableSparse)       options.PreserveSparseFiles = true;
+    if (cliOpts.disableSparse)      options.PreserveSparseFiles = false;
+    if (cliOpts.enablePreserveMeta) options.PreserveMeta = true;
+    if (cliOpts.disablePreserveMeta)options.PreserveMeta = false;
+    if (cliOpts.enableDirectIO)     options.DirectIO = true;
+    if (cliOpts.disableDirectIO)    options.DirectIO = false;
+    if (cliOpts.enableSync)         options.SyncWrites = true;
+    if (cliOpts.disableSync)        options.SyncWrites = false;
 
     // ---------- 统一参数校验 ----------
     if (options.IoSize == 0) {
@@ -258,8 +578,8 @@ int main(int argc, char *argv[])
 
 #ifdef __APPLE__
     // macOS: validate explicit CopyEngine setting
-    if (optEngine && *optEngine != "gcd") {
-        std::cerr << "Configuration error: On macOS, --engine must be 'gcd'. Got: " << *optEngine << "\n";
+    if (cliOpts.optEngine && *cliOpts.optEngine != "gcd") {
+        std::cerr << "Configuration error: On macOS, --engine must be 'gcd'. Got: " << *cliOpts.optEngine << "\n";
         return 1;
     }
     if (options.DirectIO) {
@@ -270,9 +590,32 @@ int main(int argc, char *argv[])
 
     auto logger = InitLogger(options);
 
-    std::string dstPath = positional.back();
-    std::vector<std::string> srcPaths(positional.begin(), positional.end() - 1);
+    std::string dstPath = cliOpts.positional.back();
+    std::vector<std::string> srcPaths(cliOpts.positional.begin(), cliOpts.positional.end() - 1);
     bool multiSource = srcPaths.size() > 1;
+
+    // ---------- CksumOnly / CksumCopy 模式约束校验 ----------
+    bool isCksumMode = (options.CopyMode == "CksumOnly" || options.CopyMode == "CksumCopy");
+
+    if (isCksumMode && multiSource)
+    {
+        std::cerr << "Error: Multi-source is not supported in "
+                  << options.CopyMode << " mode." << std::endl;
+        return 1;
+    }
+
+    if (isCksumMode && options.EnableInotify)
+    {
+        logger->warn("Inotify is disabled in {} mode.", options.CopyMode);
+        options.EnableInotify = false;
+    }
+
+    // ---------- dry-run：输出生效配置后直接退出 ----------
+    if (cliOpts.dryRun)
+    {
+        PrintDryRun(options, srcPaths, dstPath);
+        return 0;
+    }
 
     // ---------- 路径校验层次 1：存在性 — 所有源路径必须存在 ----------
     for (const auto& src : srcPaths)
@@ -282,6 +625,14 @@ int main(int argc, char *argv[])
             std::cerr << "Source path does not exist: " << src << std::endl;
             return 1;
         }
+    }
+
+    // CksumOnly / CksumCopy：目标必须存在
+    if (isCksumMode && !fs::exists(dstPath))
+    {
+        std::cerr << "Error: Destination path must exist in "
+                  << options.CopyMode << " mode: " << dstPath << std::endl;
+        return 1;
     }
 
     // 多源模式特殊处理：目标必须是已存在的目录，且禁用 inotify（无法同时监控多个源）
@@ -402,12 +753,28 @@ int main(int argc, char *argv[])
             }
         }
 
+        // ---------- CksumOnly / CksumCopy：源和目标必须同为文件或同为目录 ----------
+        if (isCksumMode && fs::exists(dst_p))
+        {
+            if (fs::is_directory(src_p) != fs::is_directory(dst_p))
+            {
+                std::cerr << "Error: In " << options.CopyMode
+                          << " mode, source and destination must be the same type (both files or both directories)."
+                          << std::endl;
+                anyFailed = true;
+                continue;
+            }
+        }
+
         // ---------- 路由分发：根据源类型和目标类型选择 CopyDir / CopyFile / CopyBatch ----------
         bool dstIsDir = multiSource ? fs::is_directory(dstPath) : (fs::exists(dst_p) && fs::is_directory(dst_p));
 
         if (fs::is_directory(src_p) && (dstIsDir || !fs::exists(dst_p)))
         {
-            fs::path final_dst = multiSource ? dst_p : (dstIsDir ? dst_p / src_p.filename() : dst_p);
+            // CksumOnly/CksumCopy: dst_p 已是最终目标路径，不再拼接 src filename
+            fs::path final_dst = isCksumMode ? dst_p
+                                : (multiSource ? dst_p : (dstIsDir ? dst_p / src_p.filename() : dst_p));
+
             if (multiSource)
             {
                 batchPairs.emplace_back(src_p, final_dst);
@@ -422,17 +789,28 @@ int main(int argc, char *argv[])
         }
         else if (fs::is_regular_file(src_p) && dstIsDir)
         {
-            fs::path final_dst = multiSource ? dst_p : dst_p / src_p.filename();
-            if (multiSource)
+            // CksumOnly/CksumCopy: 文件对文件校验，不应进入 "file into dir" 分支
+            if (isCksumMode)
             {
-                batchPairs.emplace_back(src_p, final_dst);
+                std::cerr << "Error: In " << options.CopyMode
+                          << " mode, source and destination must both be files or both be directories."
+                          << std::endl;
+                anyFailed = true;
             }
             else
             {
-                logger->info("begin to copy file: {} to file: {}", src_p.string(), final_dst.string());
-                int rc = CopyFile(src_p, final_dst, options, logger);
-                if (rc != 0)
-                    anyFailed = true;
+                fs::path final_dst = multiSource ? dst_p : dst_p / src_p.filename();
+                if (multiSource)
+                {
+                    batchPairs.emplace_back(src_p, final_dst);
+                }
+                else
+                {
+                    logger->info("begin to copy file: {} to file: {}", src_p.string(), final_dst.string());
+                    int rc = CopyFile(src_p, final_dst, options, logger);
+                    if (rc != 0)
+                        anyFailed = true;
+                }
             }
         }
         else if (fs::is_regular_file(src_p))

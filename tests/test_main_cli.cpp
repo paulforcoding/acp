@@ -199,3 +199,83 @@ TEST_CASE("CLI multi-source inotify disabled", "[cli]")
     fs::remove_all(d2, ec);
     fs::remove_all(dst, ec);
 }
+
+TEST_CASE("CLI CksumOnly multi-source returns 1", "[cli]")
+{
+    fs::path d1 = "/tmp/acp_cli_cksum_ms1";
+    fs::path d2 = "/tmp/acp_cli_cksum_ms2";
+    fs::path dst = "/tmp/acp_cli_cksum_ms_dst";
+    std::error_code ec;
+    fs::remove_all(d1, ec);
+    fs::remove_all(d2, ec);
+    fs::remove_all(dst, ec);
+    fs::create_directories(d1, ec);
+    fs::create_directories(d2, ec);
+    fs::create_directories(dst, ec);
+
+    int rc = run_acp("--mode=CksumOnly " + d1.string() + " " + d2.string() + " " + dst.string());
+    REQUIRE(rc == 1);
+
+    fs::remove_all(d1, ec);
+    fs::remove_all(d2, ec);
+    fs::remove_all(dst, ec);
+}
+
+TEST_CASE("CLI CksumOnly dst not exist returns 1", "[cli]")
+{
+    fs::path src = "/tmp/acp_cli_cksum_src";
+    fs::path dst = "/tmp/acp_cli_cksum_nonexist";
+    std::error_code ec;
+    fs::remove_all(src, ec);
+    fs::remove_all(dst, ec);
+    fs::create_directories(src, ec);
+
+    int rc = run_acp("--mode=CksumOnly " + src.string() + " " + dst.string());
+    REQUIRE(rc == 1);
+
+    fs::remove_all(src, ec);
+}
+
+TEST_CASE("CLI CksumCopy multi-source returns 1", "[cli]")
+{
+    fs::path d1 = "/tmp/acp_cli_icksum_ms1";
+    fs::path d2 = "/tmp/acp_cli_icksum_ms2";
+    fs::path dst = "/tmp/acp_cli_icksum_ms_dst";
+    std::error_code ec;
+    fs::remove_all(d1, ec);
+    fs::remove_all(d2, ec);
+    fs::remove_all(dst, ec);
+    fs::create_directories(d1, ec);
+    fs::create_directories(d2, ec);
+    fs::create_directories(dst, ec);
+
+    int rc = run_acp("--mode=CksumCopy " + d1.string() + " " + d2.string() + " " + dst.string());
+    REQUIRE(rc == 1);
+
+    fs::remove_all(d1, ec);
+    fs::remove_all(d2, ec);
+    fs::remove_all(dst, ec);
+}
+
+TEST_CASE("CLI CksumOnly type mismatch returns 1", "[cli]")
+{
+    fs::path srcDir = "/tmp/acp_cli_cksum_type_src";
+    fs::path dstFile = "/tmp/acp_cli_cksum_type_dst.txt";
+    std::error_code ec;
+    fs::remove_all(srcDir, ec);
+    fs::remove(dstFile, ec);
+    fs::create_directories(srcDir, ec);
+    { std::ofstream(dstFile) << "x"; }
+
+    int rc = run_acp("--mode=CksumOnly " + srcDir.string() + " " + dstFile.string());
+    REQUIRE(rc == 1);
+
+    fs::remove_all(srcDir, ec);
+    fs::remove(dstFile, ec);
+}
+
+TEST_CASE("CLI dry-run returns 0", "[cli]")
+{
+    int rc = run_acp("--dry-run /tmp/acp_dry_src /tmp/acp_dry_dst");
+    REQUIRE(rc == 0);
+}

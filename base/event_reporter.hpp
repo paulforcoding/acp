@@ -22,12 +22,14 @@ class FileLogReporter
 {
 public:
     FileLogReporter(bool enabled, const std::string& fileLogMode, int intervalSec,
-                    const std::string& fileLogPath, const std::string& stateFilePath)
+                    const std::string& fileLogPath, const std::string& stateFilePath,
+                    bool cksumOnlyFilter = false)
         : mEnabled(enabled),
           mFileLogMode(fileLogMode),
           mIntervalSec(intervalSec),
           mFileLogPath(fileLogPath),
           mStateFilePath(stateFilePath),
+          mCksumOnlyFilter(cksumOnlyFilter),
           mStartTime(std::chrono::steady_clock::now())
     {
         if (mEnabled && mFileLogMode == "file" && !mFileLogPath.empty())
@@ -304,6 +306,19 @@ private:
     void EmitEvent(const std::string &jsonLine)
     {
         std::lock_guard<std::mutex> lock(mEmitMutex);
+
+        if (mCksumOnlyFilter)
+        {
+            if (jsonLine.find("\"event\":\"cksum_result\"") == std::string::npos &&
+                jsonLine.find("\"event\":\"progress_summary\"") == std::string::npos &&
+                jsonLine.find("\"event\":\"copy_complete\"") == std::string::npos &&
+                jsonLine.find("\"event\":\"copy_plan\"") == std::string::npos &&
+                jsonLine.find("\"event\":\"state_snapshot\"") == std::string::npos)
+            {
+                return;
+            }
+        }
+
         if (mFileLogMode == "file" && !mFileLogPath.empty())
         {
             AppendToLogFile(jsonLine + "\n");
@@ -342,6 +357,7 @@ private:
     int mIntervalSec;
     std::string mFileLogPath;
     std::string mStateFilePath;
+    bool mCksumOnlyFilter;
     std::chrono::steady_clock::time_point mStartTime;
     std::chrono::steady_clock::time_point mLastSummaryTime;
     std::string mStartIsoTime{CurrentIsoTimestamp()};
