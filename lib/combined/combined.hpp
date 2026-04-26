@@ -266,12 +266,12 @@ public:
         bool result = mChannel.WaitForWorkOrClose(timeout);
         if (!result)
         {
-            mLogger->warn("WaitForWorkOrClose: returning false (can exit), pending={}, inflight={}, closed={}",
+            mLogger->debug("WaitForWorkOrClose: returning false (can exit), pending={}, inflight={}, closed={}",
                           mChannel.PendingCount(), mChannel.InflightCount(), mChannel.IsClosed());
         }
         else if (mChannel.IsClosed())
         {
-            mLogger->warn("WaitForWorkOrClose: has work despite closed, pending={}, inflight={}",
+            mLogger->debug("WaitForWorkOrClose: has work despite closed, pending={}, inflight={}",
                           mChannel.PendingCount(), mChannel.InflightCount());
         }
         return result;
@@ -285,6 +285,11 @@ public:
     {
         mLogger->warn("CPFilePairMgr state: pending={}, inflight={}, closed={}",
                        mChannel.PendingCount(), mChannel.InflightCount(), mChannel.IsClosed());
+    }
+
+    void DumpChannelState() const
+    {
+        mChannel.DumpPendingItems(mLogger);
     }
 
 private:
@@ -629,14 +634,20 @@ public:
 
             if (read_submitted.value() == 0 && write_submitted == 0 && cksum_submitted == 0)
             {
-                mLogger->warn("RunQueue: no IO submitted at round={}, pending={}, inflight={}, cksum_queue={}, closed={}",
-                               round, mCPFPMgr->PendingCount(), mCPFPMgr->InflightCount(),
-                               mCksumQueue.size(), mCPFPMgr->IsStopRequested());
                 bool hasWork = mCPFPMgr->WaitForWorkOrClose(std::chrono::milliseconds(100));
                 if (!hasWork)
                 {
                     mLogger->warn("RunQueue: exiting at round={}, channel closed and no work", round);
                     break;
+                }
+                // Only dump detailed state periodically to reduce log noise
+                if (round % 10 == 0)
+                {
+                    mLogger->warn("RunQueue: idle at round={}, pending={}, inflight={}, cksum_queue={}, closed={}",
+                                   round, mCPFPMgr->PendingCount(), mCPFPMgr->InflightCount(),
+                                   mCksumQueue.size(), mCPFPMgr->IsStopRequested());
+                    DumpState();
+                    mCPFPMgr->DumpChannelState();
                 }
             }
 

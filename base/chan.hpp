@@ -272,6 +272,7 @@ public:
     bool IsClosed() const;
     size_t PendingCount() const;
     size_t InflightCount() const;
+    void DumpPendingItems(std::shared_ptr<ILogger> logger) const;
 
 private:
     mutable std::mutex mMutex;

@@ -85,3 +85,26 @@ size_t FPChannel::InflightCount() const
     std::lock_guard<std::mutex> lock(mMutex);
     return mInflight.size();
 }
+
+void FPChannel::DumpPendingItems(std::shared_ptr<ILogger> logger) const
+{
+    std::lock_guard<std::mutex> lock(mMutex);
+    logger->warn("FPChannel dump: pending={}, inflight={}, closed={}",
+                  mPending.size(), mInflight.size(), mClosed);
+    for (size_t i = 0; i < mPending.size() && i < 5; ++i)
+    {
+        auto &fp = mPending[i];
+        logger->warn("  pending[{}]: src={}, dst={}, IsInit={}, IsDir={}, IsSymlink={}, IsReadFin={}, ReadOff={}, SrcSize={}, SkipCksum={}",
+                      i, fp->GetSrcPath(), fp->GetDstPath(),
+                      fp->IsInitialized(), fp->IsDir(), fp->IsSymlink(),
+                      fp->IsReadFinished(), fp->GetReadOffset(), fp->GetSrcFileSize(),
+                      fp->IsSkipBlockCksum());
+    }
+    for (auto it = mInflight.begin(); it != mInflight.end() && std::distance(mInflight.begin(), it) < 5; ++it)
+    {
+        auto &fp = *it;
+        logger->warn("  inflight: src={}, IsWriteFin={}, WriteOff={}, SrcSize={}",
+                      fp->GetSrcPath(), fp->IsWriteFinished(),
+                      fp->GetWriteOffset(), fp->GetSrcFileSize());
+    }
+}

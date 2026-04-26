@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, fix/test-hang]
+    branches: [main, fix/test-hang, feature/v0.5.1]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -73,14 +73,16 @@ jobs:
         timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
-      - name: Upload test_run.log (unit)
+      - name: Upload test logs (unit)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
+          name: test-logs-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
 
       - name: Test (full integration)
@@ -88,14 +90,16 @@ jobs:
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
-      - name: Upload test_run.log (integration)
+      - name: Upload test logs (integration)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
+          name: test-logs-ubuntu-${{ matrix.compiler }}-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
 
       - name: Upload binary artifact
@@ -167,14 +171,16 @@ jobs:
         timeout-minutes: 15
         run: ctest --test-dir build --output-on-failure -E integration
 
-      - name: Upload test_run.log (unit)
+      - name: Upload test logs (unit)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-centos9-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
+          name: test-logs-centos9-liburing-${{ matrix.liburing }}-unit-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
 
       - name: Test (full integration)
@@ -182,14 +188,16 @@ jobs:
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
-      - name: Upload test_run.log (integration)
+      - name: Upload test logs (integration)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-centos9-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
+          name: test-logs-centos9-liburing-${{ matrix.liburing }}-integration-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
 
       - name: Upload binary artifact
@@ -242,14 +250,16 @@ jobs:
         timeout-minutes: 20
         run: ctest --test-dir build --output-on-failure
 
-      - name: Upload test_run.log
+      - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-macos14-${{ github.run_id }}
+          name: test-logs-macos14-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
 
       - name: Upload binary artifact
@@ -300,12 +310,83 @@ jobs:
         timeout-minutes: 30
         run: ctest --test-dir build --output-on-failure
 
-      - name: Upload test_run.log
+      - name: Upload test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-run-log-sanitizer-${{ github.run_id }}
+          name: test-logs-sanitizer-${{ github.run_id }}
           path: |
             test_run.log
             build/test_run.log
+            /tmp/acp_program.log
+            /tmp/acp_file_info.json
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
+  # Repeated preserve_meta test (hang detection)
+  # Runs [preserve_meta] tests 20 times to catch intermittent hangs
+  # ---------------------------------------------------------------------------
+  hang-detection:
+    name: Hang detection (preserve_meta x20, gcc, libaio)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            libaio-dev \
+            libspdlog-dev \
+            libfmt-dev \
+            libssl-dev \
+            libxxhash-dev \
+            libacl1-dev
+
+      - name: Configure (libaio only, for hang detection)
+        run: |
+          export CC="gcc-13"
+          export CXX="g++-13"
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo
+
+      - name: Build
+        timeout-minutes: 20
+        run: cmake --build build -j$(nproc)
+
+      - name: Run preserve_meta tests x20
+        timeout-minutes: 30
+        run: |
+          rc=0
+          for i in $(seq 1 20); do
+            echo "=== Iteration $i/20 starting at $(date) ==="
+            > /tmp/acp_program.log
+            timeout 60 ./build/test_acp "[preserve_meta]" "~[integration]" 2>&1
+            iter_rc=$?
+            if [ $iter_rc -eq 142 ]; then
+              echo "HANG DETECTED at iteration $i"
+              cp /tmp/acp_program.log /tmp/acp_hang_iter_${i}.log 2>/dev/null
+              rc=1
+            elif [ $iter_rc -ne 0 ]; then
+              echo "FAILURE at iteration $i, rc=$iter_rc"
+              cp /tmp/acp_program.log /tmp/acp_fail_iter_${i}.log 2>/dev/null
+              rc=1
+            fi
+            echo "=== Iteration $i/20 finished at $(date), rc=$iter_rc ==="
+          done
+          exit $rc
+
+      - name: Upload diagnostic logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hang-detection-logs-${{ github.run_id }}
+          path: |
+            /tmp/acp_program.log
+            /tmp/acp_hang_iter_*.log
+            /tmp/acp_fail_iter_*.log
+            /tmp/acp_file_info.json
           if-no-files-found: ignore
