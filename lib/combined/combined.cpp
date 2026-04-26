@@ -341,6 +341,8 @@ tl::expected<std::shared_ptr<CPFilePair>, StackError> CPFilePairMgr::GetNextRead
         {
             if (mOptions.CopyMode == "CksumOnly")
             {
+                mLogger->debug("GetNextReadIO: CksumOnly dir/symlink, src={}, IsReadFinished={}, IsSkipBlockCksum={}",
+                               front->GetSrcPath(), front->IsReadFinished(), front->IsSkipBlockCksum());
                 auto read_complete_res = CheckReadCompleteNoLock(front);
                 if (!read_complete_res)
                 {

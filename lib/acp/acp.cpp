@@ -152,7 +152,7 @@ tl::expected<void, StackError> AIOSlotMgr::ReapWrite(struct io_event *ev)
 
 tl::expected<void, StackError> AIOSlotMgr::IOReap()
 {
-    const int max_events = static_cast<int>(mRWSlots.size());
+    const int max_events = static_cast<int>(mRWSlots.size() + mCksumSlots.size());
     std::vector<struct io_event> events(max_events);
     struct timespec timeout;
     timeout.tv_sec = mOptions.IOReapWait;

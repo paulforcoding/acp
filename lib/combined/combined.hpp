@@ -261,8 +261,24 @@ public:
     void SetStopFlag() { mChannel.Close(); }
 
     bool HasPendingWork() { return mChannel.HasPendingWork(); }
-    bool WaitForWorkOrClose(std::chrono::milliseconds timeout) { return mChannel.WaitForWorkOrClose(timeout); }
+    bool WaitForWorkOrClose(std::chrono::milliseconds timeout)
+    {
+        bool result = mChannel.WaitForWorkOrClose(timeout);
+        if (!result)
+        {
+            mLogger->warn("WaitForWorkOrClose: returning false (can exit), pending={}, inflight={}, closed={}",
+                          mChannel.PendingCount(), mChannel.InflightCount(), mChannel.IsClosed());
+        }
+        else if (mChannel.IsClosed())
+        {
+            mLogger->warn("WaitForWorkOrClose: has work despite closed, pending={}, inflight={}",
+                          mChannel.PendingCount(), mChannel.InflightCount());
+        }
+        return result;
+    }
     bool IsStopRequested() { return mChannel.IsClosed(); }
+    size_t PendingCount() { return mChannel.PendingCount(); }
+    size_t InflightCount() { return mChannel.InflightCount(); }
 
     // Dump internal state for hang diagnosis (always at warn level so it's captured)
     void DumpState() const
@@ -613,6 +629,9 @@ public:
 
             if (read_submitted.value() == 0 && write_submitted == 0 && cksum_submitted == 0)
             {
+                mLogger->warn("RunQueue: no IO submitted at round={}, pending={}, inflight={}, cksum_queue={}, closed={}",
+                               round, mCPFPMgr->PendingCount(), mCPFPMgr->InflightCount(),
+                               mCksumQueue.size(), mCPFPMgr->IsStopRequested());
                 bool hasWork = mCPFPMgr->WaitForWorkOrClose(std::chrono::milliseconds(100));
                 if (!hasWork)
                 {
@@ -1307,6 +1326,16 @@ protected:
                 // reset cksum slot after pair processing
                 auto cksumSlot = (slot->GetType() == "cksum") ? slot : slot->GetAssociatedSlot();
                 cksumSlot->Reset();
+            }
+            else
+            {
+                // Diagnostic: log why bothSlotsReadReaped is false in CksumOnly mode
+                auto assoc = slot->GetAssociatedSlot();
+                mLogger->debug("CksumOnly: bothSlotsReadReaped=false, slot type={} status={}, assoc type={} status={}, src={}",
+                               slot->GetType(), IOSlot::StatusToStr(slot->GetStatus()),
+                               assoc ? assoc->GetType() : "null",
+                               assoc ? IOSlot::StatusToStr(assoc->GetStatus()) : "null",
+                               slot->GetCPFPPtr() ? slot->GetCPFPPtr()->GetSrcPath() : "");
             }
         }
 
