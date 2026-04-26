@@ -210,7 +210,7 @@ rm -rf build                         # 完全清理
 
 ```bash
 # 通用选项
-./acp --version                    # 显示版本（v0.5.0）
+./acp --version                    # 显示版本（v0.5.1）
 ./acp --help                       # 显示所有标志
 
 # 日志选项

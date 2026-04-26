@@ -5,7 +5,7 @@
 #include "lib/mainlib.hpp"
 #include "lib/thirdparty/CLI11.hpp"
 
-constexpr const char* kVersion = "0.5.0";
+constexpr const char* kVersion = "0.5.1";
 
 #ifdef __APPLE__
 constexpr const char* kPlatform = "macOS";

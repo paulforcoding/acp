@@ -208,7 +208,7 @@ All config fields can be overridden via CLI flags. Layered resolution: hardcoded
 
 ```bash
 # General options
-./acp --version                    # Show version (v0.5.0)
+./acp --version                    # Show version (v0.5.1)
 ./acp --help                       # Show all flags
 
 # Logging options
