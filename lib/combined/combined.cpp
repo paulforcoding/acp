@@ -236,7 +236,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
             mSkipBlockCksum = true;
             mReadBytes = static_cast<size_t>(mSrcStat.st_size);
             mWrittenBytes = static_cast<size_t>(mSrcStat.st_size);
-            EmitCksumResult("skipped", "dst_missing");
+            RecordCksumContent("skipped", "dst_missing");
             return {};
         }
         if (mReporter)
@@ -275,7 +275,7 @@ tl::expected<void, StackError> CPFilePair::CheckAndInit()
                     {
                         mReporter->FileStart(mSrcPath, mDstPath, GetSrcFileSize());
                     }
-                    EmitCksumResult("match", "size_mtime_match");
+                    RecordCksumContent("match", "size_mtime_match");
                     return {};
                 }
             }
@@ -454,7 +454,15 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                 // - Mismatches are already emitted per-block in HandleReadCompletion.
                 if (!pFP->IsSkipBlockCksum() && !pFP->GetCksumError())
                 {
-                    pFP->EmitCksumResult("match", "content_match");
+                    pFP->RecordCksumContent("match", "content_match");
+                }
+                else if (pFP->GetCksumError())
+                {
+                    pFP->RecordCksumContent("mismatch", "content_mismatch");
+                }
+                else if (pFP->GetCksumContentResult().empty())
+                {
+                    pFP->RecordCksumContent("skipped", "block_cksum_skipped");
                 }
                 auto diff_res = pFP->CompareMetadata();
                 if (!diff_res)
@@ -462,6 +470,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
                     mLogger->warn("CompareMetadata failed for {}: {}",
                                   pFP->GetSrcPath(), diff_res.error().ToString());
                 }
+                pFP->FlushCksumResult();
             }
             else if (!pFP->IsSkipBlockCksum())
             {
@@ -721,29 +730,73 @@ tl::expected<void, StackError> CPFilePair::PreserveAcl()
 
 // === CompareMetadata 实现（CksumOnly 专用） ===
 
-void CPFilePair::EmitCksumResult(const std::string &result,
-                                 const std::string &reason,
-                                 size_t offset,
-                                 const std::string &detail)
+void CPFilePair::RecordCksumContent(const std::string &result, const std::string &reason)
 {
-    if (result == "mismatch")
+    mCksumContentResult = result;
+    mCksumMetaResult.clear();
+    mCksumMetaDetails.clear();
+    // For terminal cases (no further meta comparison), flush immediately
+    if (reason == "dst_missing" || reason == "size_mtime_match")
     {
-        mMetaMismatchEmitted = true;
+        mCksumMetaResult = "skipped";
+        FlushCksumResult();
     }
-    if (mReporter)
-    {
-        mReporter->FileCksumResult(mSrcPath, mDstPath, result, reason, offset, detail);
-    }
+}
+
+void CPFilePair::RecordCksumMetaMismatch(const std::string &reason, const std::string &detail)
+{
+    mMetaMismatchEmitted = true;
+    mCksumMetaResult = "mismatch";
+    if (!detail.empty())
+        mCksumMetaDetails.push_back(reason + ":" + detail);
+    else
+        mCksumMetaDetails.push_back(reason);
+}
+
+void CPFilePair::RecordCksumMetaSkipped(const std::string &reason)
+{
+    mCksumMetaResult = "skipped";
+    mCksumMetaDetails.push_back(reason);
+}
+
+void CPFilePair::RecordCksumMetaMatch()
+{
+    mCksumMetaResult = "match";
+}
+
+void CPFilePair::FlushCksumResult()
+{
+    if (!mReporter)
+        return;
+
+    // Derive combined result:
+    // - mismatch wins (any dimension mismatched → overall mismatch)
+    // - if both content and meta are skipped → skipped (e.g. dst_missing)
+    // - content="skipped" with meta=match → match (symlink/dir: content N/A)
+    // - otherwise match
+    std::string combinedResult;
+    if (mCksumContentResult == "mismatch" || mCksumMetaResult == "mismatch")
+        combinedResult = "mismatch";
+    else if (mCksumContentResult == "skipped" && mCksumMetaResult == "skipped")
+        combinedResult = "skipped";
+    else
+        combinedResult = "match";
+
+    mReporter->FileCksumResult(mSrcPath, mDstPath, combinedResult,
+                               mCksumContentResult, mCksumMetaResult,
+                               mCksumMetaDetails);
 }
 
 tl::expected<void, StackError> CPFilePair::CompareMetadata()
 {
     mMetaMismatchEmitted = false;
+    mCksumMetaDetails.clear();
+    mCksumMetaResult.clear();
 
     struct stat dstStat;
     if (lstat(mDstPath.c_str(), &dstStat) < 0)
     {
-        EmitCksumResult("skipped", "dst_stat_failed");
+        RecordCksumMetaSkipped("dst_stat_failed");
         return tl::unexpected(StackError("lstat dst failed", errno));
     }
 
@@ -755,7 +808,7 @@ tl::expected<void, StackError> CPFilePair::CompareMetadata()
 
     if (!mMetaMismatchEmitted)
     {
-        EmitCksumResult("match", "meta_match");
+        RecordCksumMetaMatch();
     }
 
     return {};
@@ -767,7 +820,7 @@ tl::expected<void, StackError> CPFilePair::CompareMode(const struct stat &dstSta
     mode_t dstMode = dstStat.st_mode & 07777;
     if (srcMode != dstMode)
     {
-        EmitCksumResult("mismatch", "mode_mismatch", 0,
+        RecordCksumMetaMismatch("mode_mismatch",
                         fmt::format("src={:04o} dst={:04o}", srcMode, dstMode));
     }
     return {};
@@ -777,12 +830,12 @@ tl::expected<void, StackError> CPFilePair::CompareOwnership(const struct stat &d
 {
     if (mSrcStat.st_uid != dstStat.st_uid)
     {
-        EmitCksumResult("mismatch", "owner_mismatch", 0,
+        RecordCksumMetaMismatch("owner_mismatch",
                         fmt::format("uid src={} dst={}", mSrcStat.st_uid, dstStat.st_uid));
     }
     if (mSrcStat.st_gid != dstStat.st_gid)
     {
-        EmitCksumResult("mismatch", "owner_mismatch", 0,
+        RecordCksumMetaMismatch("owner_mismatch",
                         fmt::format("gid src={} dst={}", mSrcStat.st_gid, dstStat.st_gid));
     }
     return {};
@@ -800,7 +853,7 @@ tl::expected<void, StackError> CPFilePair::CompareTimestamps(const struct stat &
 
     if (srcMtime.tv_sec != dstMtime.tv_sec || srcMtime.tv_nsec != dstMtime.tv_nsec)
     {
-        EmitCksumResult("mismatch", "timestamp_mismatch", 0, "mtime");
+        RecordCksumMetaMismatch("timestamp_mismatch", "mtime");
     }
     // atime is intentionally not compared: it changes on every read access
     // and would cause false positives in CksumOnly mode
@@ -897,18 +950,18 @@ tl::expected<void, StackError> CPFilePair::CompareXattr([[maybe_unused]] const s
     {
         if (dstNames.find(name) == dstNames.end())
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "src_has:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "src_has:" + name);
         }
         else if (srcValues[name] != dstValues[name])
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "diff:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "diff:" + name);
         }
     }
     for (const auto &name : dstNames)
     {
         if (srcNames.find(name) == srcNames.end())
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "dst_has:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "dst_has:" + name);
         }
     }
 #elif defined(__linux__)
@@ -993,18 +1046,18 @@ tl::expected<void, StackError> CPFilePair::CompareXattr([[maybe_unused]] const s
     {
         if (dstNames.find(name) == dstNames.end())
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "src_has:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "src_has:" + name);
         }
         else if (srcValues[name] != dstValues[name])
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "diff:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "diff:" + name);
         }
     }
     for (const auto &name : dstNames)
     {
         if (srcNames.find(name) == srcNames.end())
         {
-            EmitCksumResult("mismatch", "xattr_mismatch", 0, "dst_has:" + name);
+            RecordCksumMetaMismatch("xattr_mismatch", "dst_has:" + name);
         }
     }
 #endif
@@ -1044,7 +1097,7 @@ tl::expected<void, StackError> CPFilePair::CompareAcl([[maybe_unused]] const str
     {
         if (!dstText || strcmp(srcText, dstText) != 0)
         {
-            EmitCksumResult("mismatch", "acl_mismatch", 0,
+            RecordCksumMetaMismatch("acl_mismatch",
                             fmt::format("src={} dst={}",
                                         srcText ? srcText : "none",
                                         dstText ? dstText : "none"));

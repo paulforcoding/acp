@@ -115,6 +115,19 @@ static int count_events_with(const std::string &output,
     return count;
 }
 
+static bool has_cksum_meta_detail(const std::string &output, const std::string &detail)
+{
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line))
+    {
+        if (line.find("\"event\":\"cksum_result\"") != std::string::npos &&
+            line.find(detail) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 static RWCombinedCopyOptions make_test_options()
 {
     RWCombinedCopyOptions options;
@@ -227,11 +240,11 @@ TEST_CASE("PM-01: PreserveMeta=true then CksumOnly reports match", "[preserve_me
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "meta_match"));
+    REQUIRE(has_event_with(output, "cksum_result", "meta", "match"));
     // atime may differ because reading src updates it; only check critical metadata
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "owner_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "mode_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "xattr_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "owner_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -254,7 +267,7 @@ TEST_CASE("PM-02: PreserveMeta=false then CksumOnly reports mismatch", "[preserv
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
     // mode mismatch expected because default umask creates different mode
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "mode_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -275,7 +288,7 @@ TEST_CASE("PM-04: timestamp precision preserved then CksumOnly match", "[preserv
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "timestamp_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "timestamp_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -296,7 +309,7 @@ TEST_CASE("PM-05: timestamp not preserved then CksumOnly reports timestamp_misma
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "timestamp_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "timestamp_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -321,9 +334,9 @@ TEST_CASE("PM-06: symlink metadata preserved then CksumOnly match", "[preserve_m
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
     // atime may differ because reading src updates it; only check critical metadata
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "owner_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "mode_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "xattr_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "owner_mismatch"));
 
     fs::remove_all(src_dir, ec);
     fs::remove_all(dst_dir, ec);
@@ -386,7 +399,7 @@ TEST_CASE("PM-09: xattr preserved then CksumOnly match", "[preserve_meta]")
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "xattr_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -407,7 +420,7 @@ TEST_CASE("PM-10: xattr not preserved then CksumOnly reports xattr_mismatch", "[
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "xattr_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -431,7 +444,7 @@ TEST_CASE("PM-20: manual mode change then CksumOnly reports mode_mismatch", "[pr
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "mode_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -455,7 +468,7 @@ TEST_CASE("PM-21: manual timestamp change then CksumOnly reports timestamp_misma
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "timestamp_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "timestamp_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -483,7 +496,7 @@ TEST_CASE("PM-22: manual xattr deletion then CksumOnly reports xattr_mismatch", 
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "xattr_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -520,9 +533,9 @@ TEST_CASE("PM-30: directory tree with all metadata preserved then CksumOnly matc
     // All regular files should match (atime may differ due to read access)
     int match_count = count_events_with(output, "cksum_result", "result", "match");
     REQUIRE(match_count >= 3); // at least the 3 regular files
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "xattr_mismatch"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "owner_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "mode_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "xattr_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "owner_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -654,7 +667,7 @@ TEST_CASE("PM-13: ACL preserved then CksumOnly match", "[preserve_meta]")
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "acl_mismatch"));
+    REQUIRE_FALSE(has_cksum_meta_detail(output, "acl_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -675,7 +688,7 @@ TEST_CASE("PM-14: ACL not preserved then CksumOnly reports acl_mismatch", "[pres
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "acl_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "acl_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -702,7 +715,7 @@ TEST_CASE("PM-23: manual ACL change then CksumOnly reports acl_mismatch", "[pres
 
     std::string output = run_cksum_only(src_dir, dst_dir);
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "acl_mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "acl_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);

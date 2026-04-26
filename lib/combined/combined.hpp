@@ -143,10 +143,12 @@ public:
     void SetCksumError(bool err) { mIsChksumError = err; }
     bool GetCksumError() const { return mIsChksumError; }
 
-    void EmitCksumResult(const std::string &result,
-                         const std::string &reason,
-                         size_t offset = 0,
-                         const std::string &detail = "");
+    void RecordCksumContent(const std::string &result, const std::string &reason);
+    void RecordCksumMetaMismatch(const std::string &reason, const std::string &detail = "");
+    void RecordCksumMetaSkipped(const std::string &reason);
+    void RecordCksumMetaMatch();
+    void FlushCksumResult();
+    const std::string &GetCksumContentResult() const { return mCksumContentResult; }
 
     int64_t GetElapsedMs() const
     {
@@ -183,6 +185,9 @@ private:
 
     bool mIsChksumError = false;
     bool mMetaMismatchEmitted = false;
+    std::string mCksumContentResult;
+    std::string mCksumMetaResult;
+    std::vector<std::string> mCksumMetaDetails;
     bool mIsProbablySparse = false;
     bool mHasHoles = false;
 
@@ -1200,7 +1205,7 @@ protected:
                                    slot->GetCPFPPtr()->GetSrcPath(),
                                    slot->GetCPFPPtr()->GetDstPath());
                     ioSlot->GetCPFPPtr()->SetCksumError(true);
-                    ioSlot->GetCPFPPtr()->EmitCksumResult("mismatch", "content_mismatch", offset);
+                    ioSlot->GetCPFPPtr()->RecordCksumContent("mismatch", "content_mismatch");
                 }
 
                 if (ioSlot->GetCPFPPtr()->GetCksumError())

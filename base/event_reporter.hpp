@@ -92,20 +92,27 @@ public:
     void FileCksumResult(const std::string &src,
                          const std::string &dst,
                          const std::string &result,
-                         const std::string &reason,
-                         size_t offset = 0,
-                         const std::string &detail = "")
+                         const std::string &content,
+                         const std::string &meta,
+                         const std::vector<std::string> &metaDetails = {})
     {
         if (!mEnabled)
             return;
+        std::string detailsJson = "[";
+        for (size_t i = 0; i < metaDetails.size(); ++i)
+        {
+            if (i > 0) detailsJson += ",";
+            detailsJson += "\"" + EscapeJsonString(metaDetails[i]) + "\"";
+        }
+        detailsJson += "]";
         EmitEvent(fmt::format(
             "{{\"type\":\"file_info\",\"event\":\"cksum_result\","
-            "\"src\":\"{}\",\"dst\":\"{}\",\"result\":\"{}\",\"reason\":\"{}\","
-            "\"offset\":{},\"detail\":\"{}\",\"timestamp\":\"{}\"}}",
+            "\"src\":\"{}\",\"dst\":\"{}\",\"result\":\"{}\","
+            "\"content\":\"{}\",\"meta\":\"{}\","
+            "\"meta_details\":{},\"timestamp\":\"{}\"}}",
             EscapeJsonString(src), EscapeJsonString(dst),
-            result, EscapeJsonString(reason),
-            offset, EscapeJsonString(detail),
-            CurrentIsoTimestamp()));
+            result, content, meta,
+            detailsJson, CurrentIsoTimestamp()));
     }
 
     void CopyPlan(const std::string &scanState,

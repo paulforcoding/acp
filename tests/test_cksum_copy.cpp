@@ -124,6 +124,19 @@ static bool has_event_with(const std::string &output,
     return false;
 }
 
+static bool has_cksum_meta_detail(const std::string &output, const std::string &detail)
+{
+    std::istringstream iss(output);
+    std::string line;
+    while (std::getline(iss, line))
+    {
+        if (line.find("\"event\":\"cksum_result\"") != std::string::npos &&
+            line.find(detail) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
 TEST_CASE("CksumCopy partial last block", "[integration][cksum]")
 {
     fs::path src_dir = fs::path("testdata") / "cksum_src";
@@ -264,7 +277,7 @@ TEST_CASE("CksumOnly emits FileLog cksum_result match events", "[integration][ck
 
     // Verify cksum_result events exist
     REQUIRE(has_event_with(output, "cksum_result", "result", "match"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "meta_match"));
+    REQUIRE(has_event_with(output, "cksum_result", "meta", "match"));
 
     // Verify no cksum_result.log is created
     std::error_code ec;
@@ -294,7 +307,7 @@ TEST_CASE("CksumOnly emits skipped when dst missing", "[integration][cksum]")
     REQUIRE(rc == 0);
 
     REQUIRE(has_event_with(output, "cksum_result", "result", "skipped"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "dst_missing"));
+    REQUIRE(has_event_with(output, "cksum_result", "content", "skipped"));
     // CksumOnly filter suppresses per-file I/O events like file_complete
     REQUIRE_FALSE(has_event(output, "file_complete"));
 
@@ -384,11 +397,11 @@ TEST_CASE("CksumOnly does block-level checksum even when size/mtime match", "[in
 
     // CksumOnly must NOT report "size_mtime_match" —
     // that fast-path is CksumCopy-only (guarded by !mCksumOnly).
-    REQUIRE_FALSE(has_event_with(output, "cksum_result", "reason", "size_mtime_match"));
+    REQUIRE_FALSE(has_event_with(output, "cksum_result", "content", "size_mtime_match"));
 
     // Block-level checksum must detect the content mismatch and emit it to FileLog.
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "content_mismatch"));
+    REQUIRE(has_event_with(output, "cksum_result", "content", "mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
@@ -429,7 +442,8 @@ TEST_CASE("CksumOnly emits mismatch when mode differs", "[integration][cksum]")
     REQUIRE(rc == 0);
 
     REQUIRE(has_event_with(output, "cksum_result", "result", "mismatch"));
-    REQUIRE(has_event_with(output, "cksum_result", "reason", "mode_mismatch"));
+    REQUIRE(has_event_with(output, "cksum_result", "meta", "mismatch"));
+    REQUIRE(has_cksum_meta_detail(output, "mode_mismatch"));
 
     std::error_code ec;
     fs::remove_all(src_dir, ec);
