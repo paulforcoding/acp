@@ -204,6 +204,31 @@ TEST_CASE("CksumCopy mismatch file writes diff", "[integration][cksum]")
     fs::remove_all(src_dir, ec);
     fs::remove_all(dst_dir, ec);
 }
+
+TEST_CASE("CksumCopy truncates dst when src is smaller", "[integration][cksum]")
+{
+    fs::path src_dir = fs::path("testdata") / "cksum_trunc_src";
+    fs::path dst_dir = fs::path("/tmp") / ("acp_cksum_trunc_dst_" + std::to_string(::getpid()));
+    ensure_clean_dir(src_dir);
+    ensure_clean_dir(dst_dir);
+
+    // Create a small source file (12 bytes) and a larger destination file (34 bytes)
+    write_file_exact(src_dir / "trunc.dat", 12, 'A');
+    write_file_exact(dst_dir / "trunc.dat", 34, 'Z');
+
+    auto options = make_cksum_options();
+    auto logger = InitLogger(options);
+
+    int rc = CopyDir(src_dir, dst_dir, options, logger);
+    REQUIRE(rc == 0);
+
+    // After CksumCopy, dst must be truncated to src size
+    REQUIRE(fs::file_size(dst_dir / "trunc.dat") == 12);
+    REQUIRE(files_equal(src_dir / "trunc.dat", dst_dir / "trunc.dat"));
+
+    fs::remove_all(src_dir, ec);
+    fs::remove_all(dst_dir, ec);
+}
 #endif
 
 TEST_CASE("CksumOnly emits FileLog cksum_result match events", "[integration][cksum]")

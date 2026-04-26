@@ -427,7 +427,7 @@ tl::expected<void, StackError> CPFilePairMgr::CheckWriteComplete(std::shared_ptr
 
     if (pFP->IsWriteFinished())
     {
-        if ((mOptions.DirectIO && !pFP->IsSkipBlockCksum()) || pFP->HasHoles())
+        if (!pFP->IsSkipBlockCksum() && (mOptions.DirectIO || pFP->HasHoles() || mOptions.CopyMode == "CksumCopy"))
         {
             auto truncate_res = pFP->TruncateDstToSrcSize();
             if (!truncate_res)
